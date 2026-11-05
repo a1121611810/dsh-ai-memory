@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.1
+
+- The panel now checks the install instead of assuming it: ai-memory reachability, whether the
+  `mcp__ai-memory__*` tools are registered, and whether a rules file carries the ai-memory marker.
+  Each missing piece shows the command that fixes it; a complete install shows nothing.
+- Fix: the health helper was not imported, which made the whole check return nothing.
+
 ## 0.8.0
 
 - Installing the plugin still does nothing to ai-memory itself; the README now says so explicitly.

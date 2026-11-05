@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -89,12 +89,22 @@ function fakeAiMemory() {
   }
 }
 
-function harness(baseUrl, { editor = null } = {}) {
+function harness(baseUrl, { editor = null, mcp = true, instructions = false } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-ai-memory-route-'))
   writeFileSync(join(dir, 'auth-token'), 'tok\n')
+  const workspace = mkdtempSync(join(tmpdir(), 'dsh-ai-memory-ws-'))
+  if (instructions) {
+    mkdirSync(join(workspace, '.keep'), { recursive: true })
+    writeFileSync(join(workspace, 'AGENTS.md'), '<!-- ai-memory:start -->\nrules\n<!-- ai-memory:end -->\n')
+  }
   const routes = new Map()
   const ctx = {
-    get: (name) => (name === 'configEditor' ? editor ?? undefined : undefined),
+    get: (name) => {
+      if (name === 'configEditor') return editor ?? undefined
+      if (name === 'tools') return { definitions: () => (mcp ? [{ name: 'mcp__ai-memory__memory_status' }] : []) }
+      if (name === 'workingDirectory') return { defaultDirectory: workspace }
+      return undefined
+    },
     on: () => () => {},
     logger: { info() {}, warn() {}, debug() {} },
     fiber: { entry: { id: 'ai-memory-sync', config: { serverUrl: baseUrl, capturePrompt: false } } },
@@ -108,7 +118,7 @@ function harness(baseUrl, { editor = null } = {}) {
     },
   }
   const dispose = apply(ctx, { serverUrl: baseUrl, dataDir: dir, timeoutMs: 1000 })
-  return { routes, dispose, ctx }
+  return { routes, dispose, ctx, workspace }
 }
 
 const request = (body) => ({ json: async () => body })
@@ -144,6 +154,10 @@ test('overview returns health, scope, projects, briefing, agents and page agents
   assert.equal(body.briefing.handoffs, 1)
   assert.deepEqual(body.agents.map((entry) => entry.agent), ['claude-code', 'other'])
   assert.equal(body.pageAgents['notes/a.md'], 'claude-code')
+  assert.equal(body.setup.token, true)
+  assert.equal(body.setup.reachable, true)
+  assert.equal(body.setup.mcp, true)
+  assert.equal(body.setup.ready, true)
 
   h.dispose()
   await server.close()
@@ -226,6 +240,43 @@ test('a broken server is reported, not thrown', async () => {
   assert.equal(body.current, null)
   assert.deepEqual(body.projects, [])
   assert.deepEqual(body.agents, [])
+
+  h.dispose()
+})
+
+test('setup reports the missing pieces of a fresh install', async () => {
+  const server = fakeAiMemory()
+  const h = harness(await server.url(), { mcp: false, instructions: false })
+
+  const body = await (await h.routes.get('/api/dsh-ai-memory/overview').fetch(request({}))).json()
+  assert.equal(body.setup.mcp, false)
+  assert.equal(body.setup.instructions, false)
+  assert.equal(body.setup.ready, true)
+  assert.ok(body.setup.instructionFiles.some((path) => path.endsWith('AGENTS.md')))
+
+  h.dispose()
+  await server.close()
+})
+
+test('setup finds the marker when the rules file was written', async () => {
+  const server = fakeAiMemory()
+  const h = harness(await server.url(), { instructions: true })
+
+  const body = await (await h.routes.get('/api/dsh-ai-memory/overview').fetch(request({}))).json()
+  assert.equal(body.setup.instructions, true)
+
+  h.dispose()
+  await server.close()
+})
+
+test('setup reports a broken server as not ready', async () => {
+  const server = fakeAiMemory()
+  const h = harness(await server.url())
+  await server.close()
+
+  const body = await (await h.routes.get('/api/dsh-ai-memory/overview').fetch(request({}))).json()
+  assert.equal(body.setup.reachable, false)
+  assert.equal(body.setup.ready, false)
 
   h.dispose()
 })

@@ -66,9 +66,13 @@ window.__ModuleLoader__.load({
       .aim-foot { padding: 10px 22px 14px; border-top: 1px solid var(--dsw-alias-border-l1); display: flex; gap: 8px; align-items: center; }
       .aim-setup { border: 1px solid var(--dsw-alias-state-warn-primary); border-radius: 10px; padding: 12px 14px;
         margin-bottom: 16px; font-size: 12px; color: var(--dsw-alias-label-primary); }
-      .aim-setup h4 { margin: 0 0 6px; font-size: 13px; color: var(--dsw-alias-state-warn-primary); }
-      .aim-setup ol { margin: 6px 0 0 18px; padding: 0; color: var(--dsw-alias-label-secondary); }
-      .aim-setup li { margin: 3px 0; }
+      .aim-setup h4 { margin: 0 0 8px; font-size: 13px; color: var(--dsw-alias-state-warn-primary); }
+      .aim-setup-row { display: flex; gap: 8px; align-items: baseline; margin: 6px 0; }
+      .aim-setup-mark { width: 14px; flex: none; text-align: center; font-weight: 600; }
+      .aim-setup-row.ok .aim-setup-mark { color: var(--dsw-alias-state-success-primary); }
+      .aim-setup-row.todo .aim-setup-mark { color: var(--dsw-alias-state-error-primary); }
+      .aim-setup-row.unknown .aim-setup-mark { color: var(--dsw-alias-label-secondary); }
+      .aim-setup-hint { color: var(--dsw-alias-label-secondary); font-size: 11px; margin-top: 2px; }
       .aim-code { font-family: ui-monospace, monospace; font-size: 11px; color: var(--dsw-alias-label-primary); }
       .aim-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px 16px; }
       .aim-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
@@ -128,6 +132,36 @@ window.__ModuleLoader__.load({
       h('input', { type: 'checkbox', checked: value === true, onChange: (event) => onChange(event.target.checked) }),
       label)
 
+    const setupRow = (state, title, hint) => h('div', { className: `aim-setup-row ${state}`, key: title },
+      h('span', { className: 'aim-setup-mark' }, state === 'ok' ? '✓' : state === 'todo' ? '✗' : '?'),
+      h('div', null,
+        h('div', null, title),
+        hint ? h('div', { className: 'aim-setup-hint' }, hint) : null))
+
+    function SetupCard(props) {
+      const setup = props.setup
+      if (!setup) return null
+      const serverOk = setup.token === true && setup.reachable === true
+      const mcpState = setup.mcp === true ? 'ok' : setup.mcp === false ? 'todo' : 'unknown'
+      const instructionsState = setup.instructions === true ? 'ok' : 'todo'
+      if (serverOk && mcpState === 'ok' && instructionsState === 'ok') return null
+
+      return h('div', { className: 'aim-setup' },
+        h('h4', null, '安装检查'),
+        setupRow(serverOk ? 'ok' : 'todo', 'ai-memory 服务',
+          serverOk
+            ? (setup.reachable ? 'token 已读取 · 可连接' : 'token 已读取')
+            : '安装并启动 ai-memory（默认 127.0.0.1:49374）'),
+        setupRow(mcpState, 'MCP 工具（memory_*）',
+          mcpState === 'ok'
+            ? '已检测到 mcp__ai-memory__*'
+            : '运行 ai-memory install-mcp --client dsh，把输出的 patch 合并进 profile'),
+        setupRow(instructionsState, '指令文件（可选）',
+          instructionsState === 'ok'
+            ? '检测到 ai-memory 标记块'
+            : '运行 ai-memory install-instructions；本插件已运行时注入提示，不装也能用'))
+    }
+
     function Browse(props) {
       const p = props.payload
       const brief = p && p.briefing
@@ -136,17 +170,8 @@ window.__ModuleLoader__.load({
       const rows = props.results === null ? (brief && brief.recent ? brief.recent : []) : props.results
       const empty = props.results === null ? '这个项目还没有页面。' : '没有匹配。试试勾上「全局」。'
 
-      const setup = props.connected ? null : h('div', { className: 'aim-setup' },
-        h('h4', null, 'ai-memory 未连接'),
-        h('ol', null,
-          h('li', null, '安装并启动 ai-memory（默认监听 127.0.0.1:49374）'),
-          h('li', null, '想要 memory_* 工具：运行 ',
-            h('span', { className: 'aim-code' }, 'ai-memory install-mcp --client dsh'),
-            '，把输出的 patch 合并进 profile'),
-          h('li', null, '回到这里点 Refresh')))
-
       return h(React.Fragment, null,
-        setup,
+        h(SetupCard, { setup: props.setup }),
         h('div', { className: 'aim-sec' },
           h('div', { className: 'aim-h2' }, props.headline),
           h('div', { className: 'aim-meta' }, props.meta),
@@ -381,6 +406,7 @@ window.__ModuleLoader__.load({
             onSearch: runSearch,
             projectCount: allProjects.length,
             connected,
+            setup: payload && payload.setup,
           })
           : h(Settings, {
             payload,

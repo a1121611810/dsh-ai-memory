@@ -8,12 +8,14 @@
  * Everything here is best-effort. A missing server, an unreachable port, or a
  * malformed session must never disturb the agent loop.
  */
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 
 import z from '@deepseek-ai/schemastery'
 
 import { buildHookPayload, clipJson, clipText, postHook } from './lib/hook.js'
-import { buildOverview, search } from './lib/mcp.js'
+import { buildOverview, health, search } from './lib/mcp.js'
 import { normalizeBaseUrl, readToken, resolveDataDir } from './lib/paths.js'
 import { createSender } from './lib/queue.js'
 import { redactDeep, redactSecrets } from './lib/redact.js'
@@ -324,6 +326,61 @@ export function apply(ctx, config) {
     })()
   })
 
+  const fileHasMarker = (path) => {
+    try {
+      return readFileSync(path, 'utf8').includes('ai-memory:start')
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   * Two required checks and two optional ones. The plugin can run without the
+   * optional pair (the scope note is injected at runtime), but a fresh install
+   * usually wants all four, so each missing piece gets its own command.
+   */
+  const setupStatus = async () => {
+    const defaults = (() => {
+      try {
+        return ctx.get('workingDirectory')?.defaultDirectory ?? null
+      } catch {
+        return null
+      }
+    })()
+    const instructionFiles = [
+      join(homedir(), '.agents', 'AGENTS.md'),
+      defaults ? join(defaults, 'AGENTS.md') : null,
+      defaults ? join(defaults, 'CLAUDE.md') : null,
+    ].filter((path) => typeof path === 'string')
+
+    let reachable = false
+    try {
+      reachable = (await health({ baseUrl, timeoutMs: Math.min(settings.timeoutMs, 1500) }))?.status === 'ok'
+    } catch {
+      reachable = false
+    }
+
+    let mcp = null
+    try {
+      const tools = ctx.get('tools')
+      const definitions = typeof tools?.definitions === 'function' ? tools.definitions() : null
+      if (Array.isArray(definitions)) {
+        mcp = definitions.some((tool) => String(tool?.name ?? '').startsWith('mcp__ai-memory__'))
+      }
+    } catch {
+      mcp = null
+    }
+
+    return {
+      token: token !== null,
+      reachable,
+      mcp,
+      instructions: instructionFiles.some(fileHasMarker),
+      instructionFiles,
+      ready: token !== null && reachable,
+    }
+  }
+
   // Read-only routes behind the sidebar panel. A route keeps the browser half
   // free of tokens: only the Host process talks to ai-memory.
   const jsonResponse = (payload, status = 200) => Response.json(payload, {
@@ -345,13 +402,16 @@ export function apply(ctx, config) {
   const overviewHandler = async (request) => {
     try {
       const body = await readJson(request)
-      const overview = await buildOverview({
-        baseUrl,
-        token,
-        scope: scopeOf(body),
-        timeoutMs: settings.timeoutMs,
-      })
-      return jsonResponse(overview)
+      const [overview, setup] = await Promise.all([
+        buildOverview({
+          baseUrl,
+          token,
+          scope: scopeOf(body),
+          timeoutMs: settings.timeoutMs,
+        }),
+        setupStatus().catch(() => null),
+      ])
+      return jsonResponse({ ...overview, setup })
     } catch (error) {
       return jsonResponse({ ok: false, error: String(error?.message ?? error) })
     }

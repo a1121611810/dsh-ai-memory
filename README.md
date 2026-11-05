@@ -74,6 +74,13 @@ The plugin adds an **ai-memory** entry to the left rail: a memory browser with t
 - Search: full-text inside the selected project, or across every project with **全局**. Every hit
   shows the project it came from.
 
+**Install check**
+
+Above the counters, the panel verifies three things: the service is reachable (token + `/healthz`),
+the `mcp__ai-memory__*` tools are registered, and a rules file (`~/.agents/AGENTS.md`, the
+workspace's `AGENTS.md` or `CLAUDE.md`) carries the `ai-memory:start` marker. Each missing piece
+shows the command that fixes it, and a complete install shows nothing.
+
 **Settings**
 
 - The plugin's own knobs: `serverUrl`, `agent`, timeouts, capture switches, budgets. Saving goes
