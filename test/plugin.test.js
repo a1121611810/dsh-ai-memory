@@ -74,7 +74,7 @@ test('apply forwards session start and end with the real session identity', asyn
   await flush()
 
   assert.equal(h.received.length, 2)
-  assert.match(h.received[0].url, /\/hook\?event=session-start&agent=dsh$/)
+  assert.match(h.received[0].url, /\/hook\?event=session-start&agent=claude-code$/)
   assert.equal(h.received[0].authorization, 'Bearer tok')
   assert.deepEqual(h.received[0].body, {
     session_id: 'session-1',
@@ -83,7 +83,7 @@ test('apply forwards session start and end with the real session identity', asyn
     hook_event_name: 'SessionStart',
     source: 'startup',
   })
-  assert.match(h.received[1].url, /\/hook\?event=session-end&agent=dsh$/)
+  assert.match(h.received[1].url, /\/hook\?event=session-end&agent=claude-code$/)
   assert.deepEqual(h.received[1].body, {
     session_id: 'session-1',
     transcript_path: '',

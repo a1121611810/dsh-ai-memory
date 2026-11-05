@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.1
+
+- Revert the default agent label to `claude-code`. ai-memory binds the agent kind to a session id
+  when the session is first stored; sending a different label for an existing session is dropped
+  with `hook session collision`, which is why a resumed session stopped being captured after 0.3.0.
+  Changing `agent` on a store that already has sessions breaks them — keep the default.
+
 ## 0.5.0
 
 - A session is opened by its first agent activity (prompt, tool result, turn end), not only by

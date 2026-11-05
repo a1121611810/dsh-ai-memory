@@ -74,7 +74,7 @@ Set these on the plugin row (`cordis.patch.yml` or the row's configuration page)
 |---|---|---|
 | `serverUrl` | `http://127.0.0.1:49374` | ai-memory base URL. Non-loopback hosts are refused unless `allowRemote` is set, and must then use `https`. |
 | `dataDir` | platform default | Where to read `auth-token`. Empty resolves `$AI_MEMORY_DATA_DIR`, then the platform data directory. |
-| `agent` | `dsh` | Agent label ai-memory records. 3.0 files unknown labels as `other`; set `claude-code` for the older attribution. |
+| `agent` | `claude-code` | Agent label ai-memory records. ai-memory binds the agent kind to a session id on first capture, so changing this after sessions exist makes their events drop as session collisions. Leave it alone. |
 | `allowRemote` | `false` | Permit a non-loopback server. |
 | `timeoutMs` | `3000` | Per-request timeout. |
 | `captureSession` | `true` | Forward session start and end. |

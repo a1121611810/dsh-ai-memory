@@ -23,7 +23,7 @@ export const name = 'dsh-ai-memory'
 export const DEFAULTS = Object.freeze({
   serverUrl: 'http://127.0.0.1:49374',
   dataDir: '',
-  agent: 'dsh',
+  agent: 'claude-code',
   allowRemote: false,
   timeoutMs: 3000,
   captureSession: true,
