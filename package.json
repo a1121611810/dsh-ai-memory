@@ -14,7 +14,9 @@
     "lib/*.js",
     "cordis.patch.yml",
     "locale/*.json",
-    "icon.svg"
+    "icon.svg",
+    "SECURITY.md",
+    "CHANGELOG.md"
   ],
   "engines": {
     "dsh": ">=0.2.2-rc.1"
@@ -38,5 +40,14 @@
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "^3.18.4"
+  },
+  "author": "lilianda",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/a1121611810/dsh-ai-memory.git"
+  },
+  "homepage": "https://github.com/a1121611810/dsh-ai-memory#readme",
+  "bugs": {
+    "url": "https://github.com/a1121611810/dsh-ai-memory/issues"
   }
 }
