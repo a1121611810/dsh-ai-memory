@@ -357,6 +357,40 @@ export function apply(ctx, config) {
     }
   }
 
+  const settingsKeys = Object.keys(DEFAULTS)
+  const readSettings = () => {
+    try {
+      const entry = ctx.fiber?.entry
+      const config = isObject(entry?.config) ? entry.config : {}
+      return { ok: true, entryId: entry?.id ?? null, config, editable: Boolean(ctx.get('configEditor')) }
+    } catch {
+      return { ok: true, entryId: null, config: {}, editable: false }
+    }
+  }
+  const saveSettings = async (patch) => {
+    const editor = ctx.get('configEditor')
+    const entry = ctx.fiber?.entry
+    if (!editor || !entry) return { ok: false, error: 'configuration cannot be saved in this profile' }
+    const candidate = {}
+    for (const key of settingsKeys) if (Object.hasOwn(patch, key)) candidate[key] = patch[key]
+    try {
+      Config({ ...(isObject(entry.config) ? entry.config : {}), ...candidate })
+    } catch (error) {
+      return { ok: false, error: String(error?.message ?? error) }
+    }
+    try {
+      await editor.edit(entry, (current) => ({ ...current, ...candidate }))
+      return { ok: true, saved: candidate }
+    } catch (error) {
+      return { ok: false, error: String(error?.message ?? error) }
+    }
+  }
+  const settingsHandler = async (request) => {
+    const body = await readJson(request)
+    if (isObject(body.patch)) return jsonResponse(await saveSettings(body.patch))
+    return jsonResponse(readSettings())
+  }
+
   const searchHandler = async (request) => {
     try {
       const body = await readJson(request)
@@ -388,6 +422,7 @@ export function apply(ctx, config) {
       )
       route('/api/dsh-ai-memory/overview', overviewHandler, 'dsh-ai-memory: overview route')
       route('/api/dsh-ai-memory/search', searchHandler, 'dsh-ai-memory: search route')
+      route('/api/dsh-ai-memory/settings', settingsHandler, 'dsh-ai-memory: settings route')
     })
   } catch (error) {
     log('warn', `overview route unavailable: ${error?.message ?? error}`)

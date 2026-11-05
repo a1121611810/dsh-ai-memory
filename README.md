@@ -51,17 +51,27 @@ retried in the background, or blocked.
 
 ## Sidebar panel
 
-The plugin adds an **ai-memory** entry to the left rail. It opens a memory browser:
+The plugin adds an **ai-memory** entry to the left rail: a memory browser with two tabs.
 
-- **Left**: every project that holds at least one page, newest first, with its page count. The
-  session's own project is pinned at the top. Filter by name.
-- **Right**: the selected project's counters, 7-day activity, open handoffs, pending messages,
-  rules, and its most recently updated pages.
-- **Search**: full-text search inside the selected project, or across every project with the
-  **全局** switch.
+**Browse**
 
-Two read-only Host routes back the panel (`overview`, `search`); the browser never receives the
-bearer token.
+- Left: every project that holds pages, newest first; the session's own project is pinned on top.
+- Right: counters, 7-day activity, open handoffs, messages, rules, and the project's agent
+  breakdown (which harness wrote how many sessions), then its most recently updated pages —
+  each tagged with its kind and the agent recorded in its frontmatter.
+- Search: full-text inside the selected project, or across every project with **全局**. Every hit
+  shows the project it came from.
+
+**Settings**
+
+- The plugin's own knobs: `serverUrl`, `agent`, timeouts, capture switches, budgets. Saving goes
+  through the profile's config editor, which restarts the plugin once.
+- Read-only server facts: ai-memory version, bind address, data directory, LLM/embedding provider
+  status, and ingest counters (stored, dropped). Changing those means editing ai-memory's
+  `config.toml` and restarting the service.
+
+Three read-only Host routes back the panel (`overview`, `search`, `settings`); the browser never
+receives the bearer token.
 
 Restart the app after installing: the browser half is loaded at boot.
 

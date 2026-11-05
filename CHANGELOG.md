@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.0
+
+- Pages and hits now show where they came from: the owning project on every search result, the
+  agent that wrote a page, and the project's agent breakdown (sessions per harness).
+- Search moved to `/api/v1/search`, which returns the owning project with each hit.
+- A Settings tab: the plugin's own knobs are editable (serverUrl, capture switches, budgets) and
+  saved through the config editor; the ai-memory server's version, providers and ingest counters
+  are shown read-only.
+
 ## 0.6.0
 
 - The sidebar panel is a memory browser: every project that holds pages, one project's snapshot

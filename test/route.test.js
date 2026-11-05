@@ -22,7 +22,7 @@ const BRIEFING = {
   scope: { workspace: 'default', project: 'acme-api', resolved_by: 'explicit' },
 }
 const QUERY = {
-  hits: [{ path: 'notes/a.md', title: 'A note', snippet: 'about <mark>cache</mark>' }],
+  hits: [{ path: 'notes/a.md', title: 'A note', snippet: 'about <mark>cache</mark>', project: 'acme-api' }],
 }
 const PROJECTS = [
   { workspace_name: 'default', project_name: 'acme-api', page_count: 6, last_updated: '2026-11-05T16:00:00Z' },
@@ -32,15 +32,32 @@ const PROJECTS = [
 function fakeAiMemory() {
   const calls = []
   const server = createServer((request, response) => {
-    if (request.method === 'GET' && request.url === '/healthz') {
-      response.writeHead(200, { 'content-type': 'application/json' }).end('{"status":"ok"}')
-      return
+    const url = new URL(request.url, 'http://127.0.0.1')
+    const json = (payload) => response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(payload))
+
+    if (request.method === 'GET' && url.pathname === '/healthz') return json({ status: 'ok' })
+    if (request.method === 'GET' && url.pathname === '/api/v1/projects') return json(PROJECTS)
+    if (request.method === 'GET' && url.pathname === '/api/v1/search') {
+      calls.push({ search: url.searchParams.get('q'), project: url.searchParams.get('project') })
+      return json(QUERY.hits)
     }
-    if (request.method === 'GET' && request.url === '/api/v1/projects') {
-      response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(PROJECTS))
-      return
+    if (request.method === 'GET' && url.pathname === '/admin/status') {
+      return json({
+        version: '3.0.0',
+        data_dir: '/data/ai-memory',
+        bind: '127.0.0.1:49374',
+        counts: STATUS.counts,
+        providers: { llm: { status: 'disabled' }, embedding: { status: 'disabled' } },
+        ingest: { stored: 9, dropped_collision: 2, last_persisted_ms: 1 },
+      })
     }
-    if (request.method === 'POST' && request.url === '/mcp') {
+    if (request.method === 'GET' && url.pathname === '/admin/sessions/by-agent') {
+      return json({ by_agent: [{ agent: 'claude-code', sessions: 18 }, { agent: 'other', sessions: 3 }] })
+    }
+    if (request.method === 'GET' && url.pathname === '/admin/read-page') {
+      return json({ path: url.searchParams.get('path'), frontmatter: { agent: 'claude-code' } })
+    }
+    if (request.method === 'POST' && url.pathname === '/mcp') {
       let body = ''
       request.setEncoding('utf8')
       request.on('data', (chunk) => { body += chunk })
@@ -52,11 +69,7 @@ function fakeAiMemory() {
           : call.params.name === 'memory_briefing'
             ? BRIEFING
             : QUERY
-        response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({
-          jsonrpc: '2.0',
-          id: call.id,
-          result: { content: [{ type: 'text', text: JSON.stringify(value) }] },
-        }))
+        json({ jsonrpc: '2.0', id: call.id, result: { content: [{ type: 'text', text: JSON.stringify(value) }] } })
       })
       return
     }
@@ -76,75 +89,79 @@ function fakeAiMemory() {
   }
 }
 
-function harness(baseUrl) {
+function harness(baseUrl, { editor = null } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-ai-memory-route-'))
   writeFileSync(join(dir, 'auth-token'), 'tok\n')
   const routes = new Map()
   const ctx = {
-    get: () => undefined,
+    get: (name) => (name === 'configEditor' ? editor ?? undefined : undefined),
     on: () => () => {},
     logger: { info() {}, warn() {}, debug() {} },
-    inject(deps, callback) {
+    fiber: { entry: { id: 'ai-memory-sync', config: { serverUrl: baseUrl, capturePrompt: false } } },
+    inject: (deps, callback) => {
       callback({
         get: (name) => (name === 'connection'
           ? { fetch: { register: (route) => { routes.set(route.path, route); return () => {} } } }
-          : undefined),
+          : ctx.get(name)),
         effect: (fn) => fn(),
       })
     },
   }
   const dispose = apply(ctx, { serverUrl: baseUrl, dataDir: dir, timeoutMs: 1000 })
-  return { routes, dispose }
+  return { routes, dispose, ctx }
 }
 
 const request = (body) => ({ json: async () => body })
 
 test('the Host registers the panel routes', async () => {
   const server = fakeAiMemory()
-  const baseUrl = await server.url()
-  const h = harness(baseUrl)
+  const h = harness(await server.url())
 
-  assert.deepEqual([...h.routes.keys()].sort(), ['/api/dsh-ai-memory/overview', '/api/dsh-ai-memory/search'])
+  assert.deepEqual([...h.routes.keys()].sort(), [
+    '/api/dsh-ai-memory/overview',
+    '/api/dsh-ai-memory/search',
+    '/api/dsh-ai-memory/settings',
+  ])
   for (const route of h.routes.values()) assert.deepEqual(route.methods, ['POST'])
 
   h.dispose()
   await server.close()
 })
 
-test('overview returns health, scope, projects and one briefing', async () => {
+test('overview returns health, scope, projects, briefing, agents and page agents', async () => {
   const server = fakeAiMemory()
-  const baseUrl = await server.url()
-  const h = harness(baseUrl)
+  const h = harness(await server.url())
 
-  const response = await h.routes.get('/api/dsh-ai-memory/overview').fetch(request({}))
-  const body = await response.json()
+  const body = await (await h.routes.get('/api/dsh-ai-memory/overview').fetch(request({}))).json()
 
   assert.equal(body.ok, true)
   assert.equal(body.server.status, 'ok')
+  assert.equal(body.server.version, '3.0.0')
+  assert.equal(body.server.providers.llm, 'disabled')
+  assert.equal(body.server.ingest.dropped, 2)
   assert.equal(body.current.project, 'acme-api')
-  assert.equal(body.counts.sessions, 21)
   assert.deepEqual(body.projects.map((entry) => entry.project), ['acme-api'])
   assert.equal(body.briefing.handoffs, 1)
-  assert.equal(body.briefing.recent[0].path, 'notes/a.md')
+  assert.deepEqual(body.agents.map((entry) => entry.agent), ['claude-code', 'other'])
+  assert.equal(body.pageAgents['notes/a.md'], 'claude-code')
 
   h.dispose()
   await server.close()
 })
 
-test('search strips snippet markup and honours the global switch', async () => {
+test('search scopes by project and keeps the owning project on each hit', async () => {
   const server = fakeAiMemory()
-  const baseUrl = await server.url()
-  const h = harness(baseUrl)
+  const h = harness(await server.url())
   const search = h.routes.get('/api/dsh-ai-memory/search')
 
   const scoped = await (await search.fetch(request({ q: 'cache', workspace: 'default', project: 'acme-api' }))).json()
   assert.equal(scoped.hits.length, 1)
   assert.equal(scoped.hits[0].snippet, 'about cache')
+  assert.equal(scoped.hits[0].project, 'acme-api')
+  assert.equal(server.calls.at(-1).project, 'acme-api')
 
   await (await search.fetch(request({ q: 'cache', global: true }))).json()
-  const args = server.calls.at(-1).params.arguments
-  assert.equal(args.global, true)
-  assert.equal(args.project, undefined)
+  assert.equal(server.calls.at(-1).project, null)
 
   const empty = await (await search.fetch(request({ q: '   ' }))).json()
   assert.deepEqual(empty.hits, [])
@@ -153,16 +170,57 @@ test('search strips snippet markup and honours the global switch', async () => {
   await server.close()
 })
 
+test('settings reads the row config and refuses to save without an editor', async () => {
+  const server = fakeAiMemory()
+  const h = harness(await server.url())
+  const settings = h.routes.get('/api/dsh-ai-memory/settings')
+
+  const read = await (await settings.fetch(request({}))).json()
+  assert.equal(read.entryId, 'ai-memory-sync')
+  assert.equal(read.config.capturePrompt, false)
+  assert.equal(read.editable, false)
+
+  const save = await (await settings.fetch(request({ patch: { capturePrompt: true } }))).json()
+  assert.equal(save.ok, false)
+
+  h.dispose()
+  await server.close()
+})
+
+test('settings saves through the config editor after validation', async () => {
+  const server = fakeAiMemory()
+  const edits = []
+  const editor = {
+    edit: async (entry, change) => { edits.push(change(entry.config)) },
+  }
+  const h = harness(await server.url(), { editor })
+  const settings = h.routes.get('/api/dsh-ai-memory/settings')
+
+  const ok = await (await settings.fetch(request({ patch: { capturePrompt: true, timeoutMs: 5000 } }))).json()
+  assert.equal(ok.ok, true)
+  assert.equal(edits.length, 1)
+  assert.equal(edits[0].capturePrompt, true)
+  assert.equal(edits[0].timeoutMs, 5000)
+
+  const bad = await (await settings.fetch(request({ patch: { timeoutMs: 5 } }))).json()
+  assert.equal(bad.ok, false)
+  assert.equal(edits.length, 1)
+
+  h.dispose()
+  await server.close()
+})
+
 test('a broken server is reported, not thrown', async () => {
   const server = fakeAiMemory()
-  const baseUrl = await server.url()
-  const h = harness(baseUrl)
+  const h = harness(await server.url())
   await server.close()
 
   const body = await (await h.routes.get('/api/dsh-ai-memory/overview').fetch(request({}))).json()
   assert.equal(body.ok, true)
   assert.equal(body.server.status, 'unknown')
   assert.equal(body.current, null)
+  assert.deepEqual(body.projects, [])
+  assert.deepEqual(body.agents, [])
 
   h.dispose()
 })
