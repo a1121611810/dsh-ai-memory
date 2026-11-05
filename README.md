@@ -74,7 +74,7 @@ Set these on the plugin row (`cordis.patch.yml` or the row's configuration page)
 |---|---|---|
 | `serverUrl` | `http://127.0.0.1:49374` | ai-memory base URL. Non-loopback hosts are refused unless `allowRemote` is set, and must then use `https`. |
 | `dataDir` | platform default | Where to read `auth-token`. Empty resolves `$AI_MEMORY_DATA_DIR`, then the platform data directory. |
-| `agent` | `claude-code` | Agent label ai-memory records. `dsh` is stored as `other`, so the default keeps parsing and handoffs working. |
+| `agent` | `dsh` | Agent label ai-memory records. 3.0 files unknown labels as `other`; set `claude-code` for the older attribution. |
 | `allowRemote` | `false` | Permit a non-loopback server. |
 | `timeoutMs` | `3000` | Per-request timeout. |
 | `captureSession` | `true` | Forward session start and end. |
@@ -85,6 +85,19 @@ Set these on the plugin row (`cordis.patch.yml` or the row's configuration page)
 | `maxToolChars` | `2000` | Tool input and result budget. |
 | `maxInflight` | `4` | Concurrent ingest requests. |
 | `cooldownMs` | `30000` | How long to stop sending after five consecutive failures. |
+| `announceScope` | `true` | Add a short prompt section explaining that memory is shared but filed per project. |
+
+## How memory is scoped
+
+ai-memory is one store shared by every agent on the machine, but pages are filed **per project**,
+and a project is resolved from the working directory (git remote). Two consequences:
+
+- Agents that run in the same repository read each other's memory automatically.
+- `memory_query` searches only the current project. To read another project, or work another
+  agent did elsewhere, pass `global: true` or explicit `workspace`/`project` scopes.
+
+This plugin tells the model that at every session (`announceScope`), so a thin result reads as
+"not in this project" instead of "not remembered".
 
 ## Privacy and security
 

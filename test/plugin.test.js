@@ -71,7 +71,7 @@ test('apply forwards session start and end with the real session identity', asyn
   await flush()
 
   assert.equal(h.received.length, 2)
-  assert.match(h.received[0].url, /\/hook\?event=session-start&agent=claude-code$/)
+  assert.match(h.received[0].url, /\/hook\?event=session-start&agent=dsh$/)
   assert.equal(h.received[0].authorization, 'Bearer tok')
   assert.deepEqual(h.received[0].body, {
     session_id: 'session-1',
@@ -80,7 +80,7 @@ test('apply forwards session start and end with the real session identity', asyn
     hook_event_name: 'SessionStart',
     source: 'startup',
   })
-  assert.match(h.received[1].url, /\/hook\?event=session-end&agent=claude-code$/)
+  assert.match(h.received[1].url, /\/hook\?event=session-end&agent=dsh$/)
   assert.deepEqual(h.received[1].body, {
     session_id: 'session-1',
     transcript_path: '',
@@ -207,4 +207,45 @@ test('turn stopping is forwarded as a stop event', async () => {
   assert.ok(stop)
   assert.equal(stop.body.hook_event_name, 'Stop')
   await h.close()
+})
+
+function promptHarness() {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-ai-memory-prompt-'))
+  writeFileSync(join(dir, 'auth-token'), 'tok\n')
+  const captured = { sections: [] }
+  const ctx = {
+    get: () => undefined,
+    on: () => () => {},
+    logger: { info() {}, warn() {}, debug() {} },
+    inject(deps, callback) {
+      if (!deps.includes('systemPrompt')) return
+      callback({
+        get: (name) => (name === 'systemPrompt'
+          ? {
+            section: (section) => { captured.sections.push(section); return () => {} },
+            getSectionOrder: () => 100,
+          }
+          : undefined),
+        effect: (fn) => fn(),
+      })
+    },
+  }
+  return { dir, ctx, captured }
+}
+
+test('the Host publishes a memory-scope note at session start', () => {
+  const h = promptHarness()
+  apply(h.ctx, { serverUrl: 'http://127.0.0.1:1', dataDir: h.dir })
+  assert.equal(h.captured.sections.length, 1)
+  const [section] = h.captured.sections
+  assert.equal(section.name, 'dsh-ai-memory:scope')
+  assert.equal(section.order, 600)
+  assert.match(section.text, /global: true/)
+  assert.match(section.text, /filed per project/)
+})
+
+test('announceScope: false suppresses the note', () => {
+  const h = promptHarness()
+  apply(h.ctx, { serverUrl: 'http://127.0.0.1:1', dataDir: h.dir, announceScope: false })
+  assert.equal(h.captured.sections.length, 0)
 })

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0
+
+- Every session carries a short note explaining that ai-memory is shared but filed per
+  project, and that a thin result means "not in this project" rather than "not remembered".
+  Set `announceScope: false` to drop it.
+- The default agent label is now `dsh`. ai-memory 3.0 files unknown labels as `other`, which
+  is honest; set `agent: claude-code` to restore the previous attribution.
+
 ## 0.2.0
 
 - A sidebar entry and panel: server status, the resolved project, counters and the

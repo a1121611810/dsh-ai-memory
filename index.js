@@ -23,7 +23,7 @@ export const name = 'dsh-ai-memory'
 export const DEFAULTS = Object.freeze({
   serverUrl: 'http://127.0.0.1:49374',
   dataDir: '',
-  agent: 'claude-code',
+  agent: 'dsh',
   allowRemote: false,
   timeoutMs: 3000,
   captureSession: true,
@@ -34,6 +34,7 @@ export const DEFAULTS = Object.freeze({
   maxToolChars: 2000,
   maxInflight: 4,
   cooldownMs: 30000,
+  announceScope: true,
 })
 
 export const Config = z.object({
@@ -63,9 +64,25 @@ export const Config = z.object({
     .description('Concurrent ingest requests.'),
   cooldownMs: z.number().min(0).max(600000).default(DEFAULTS.cooldownMs)
     .description('How long to stop sending after repeated failures.'),
+  announceScope: z.boolean().default(DEFAULTS.announceScope)
+    .description('Tell the model at every session that ai-memory is filed per project and how to search across projects.'),
 })
 
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value)
+
+/**
+ * One short, static note: memory is shared on this machine but filed per
+ * project, so a thin result is a scoping signal, not an absence of knowledge.
+ */
+const SCOPE_NOTE = [
+  '## ai-memory scope',
+  '',
+  'ai-memory is shared by every agent on this machine, but pages are filed per project (one project per repository, resolved from the working directory).',
+  '',
+  '- `memory_query` without arguments searches only the current project.',
+  '- When the question may span other projects or other agents, search again with `global: true`, or pass explicit `workspace`/`project` scopes.',
+  '- A thin or empty result means "not in this project", not "not remembered".',
+].join('\n')
 
 /** Join the text blocks of one user message; reasoning and images are ignored. */
 function messageText(message) {
@@ -289,6 +306,32 @@ export function apply(ctx, config) {
     })
   } catch (error) {
     log('warn', `overview route unavailable: ${error?.message ?? error}`)
+  }
+
+  // Tell the model how memory is scoped. Memory is shared on this machine but
+  // filed per project, and the profile layer only reaches a client through
+  // lifecycle hooks, which DSH does not have.
+  if (settings.announceScope !== false) {
+    try {
+      ctx.inject(['systemPrompt'], (scope) => {
+        const systemPrompt = scope.get('systemPrompt')
+        if (!systemPrompt || typeof systemPrompt.section !== 'function') return
+        let order = 950
+        try {
+          const base = systemPrompt.getSectionOrder?.('DEPLOYMENT_PERSONA_SUFFIX')
+          if (typeof base === 'number' && Number.isFinite(base)) order = base + 500
+        } catch {
+          // Fall back to the static order.
+        }
+        scope.effect(() => systemPrompt.section({
+          name: 'dsh-ai-memory:scope',
+          order,
+          text: SCOPE_NOTE,
+        }))
+      })
+    } catch (error) {
+      log('warn', `scope note unavailable: ${error?.message ?? error}`)
+    }
   }
 
   // A reachability probe is best-effort and never blocks activation.
