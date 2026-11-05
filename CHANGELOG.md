@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.1
+
+- The pinned row is labelled "共享槽位" instead of "当前会话": it shows the project unscoped MCP
+  calls resolve to, which another window can change at any time.
+
 ## 0.9.0
 
 - The install check is actionable: the rules-file row has a **write** button that inserts or

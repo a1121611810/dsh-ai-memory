@@ -425,7 +425,7 @@ window.__ModuleLoader__.load({
             type: 'button',
             onClick: () => pick(null),
           },
-          h('span', { className: 'aim-proj-name' }, `当前会话 · ${current.project}`),
+          h('span', { className: 'aim-proj-name' }, `共享槽位 · ${current.project}`),
           h('span', { className: 'aim-proj-n' }, brief && brief.counts ? String(brief.counts.pages_latest) : ''))
           : null,
         visible.map((entry) => h('button', {
