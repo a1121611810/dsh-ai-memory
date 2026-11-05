@@ -7,7 +7,7 @@ import { test } from 'node:test'
 
 import { apply } from '../index.js'
 
-function harness({ token = 'tok' } = {}) {
+function harness({ token = 'tok', ensureCwd = '/repo', roots = null } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-ai-memory-'))
   if (token !== null) writeFileSync(join(dir, 'auth-token'), `${token}\n`)
   const received = []
@@ -31,7 +31,10 @@ function harness({ token = 'tok' } = {}) {
   const handlers = new Map()
   const ctx = {
     get(name) {
-      if (name === 'workingDirectory') return { get: () => '/repo' }
+      if (name === 'workingDirectory') {
+        return { get: () => '/repo', ensure: async () => ensureCwd }
+      }
+      if (name === 'agents') return roots === null ? undefined : { roots: () => roots }
       return undefined
     },
     on(event, handler) {
@@ -248,4 +251,47 @@ test('announceScope: false suppresses the note', () => {
   const h = promptHarness()
   apply(h.ctx, { serverUrl: 'http://127.0.0.1:1', dataDir: h.dir, announceScope: false })
   assert.equal(h.captured.sections.length, 0)
+})
+
+test('a resumed agent opens the session when creation never announced it', async () => {
+  const h = harness()
+  const baseUrl = await h.url()
+  apply(h.ctx, { serverUrl: baseUrl, dataDir: h.dir, timeoutMs: 500 })
+
+  h.handlers.get('agent/created')({ agent: { id: 'session-resume' }, source: 'resume' })
+  await flush()
+
+  const starts = h.received.filter((entry) => entry.url.includes('session-start'))
+  assert.equal(starts.length, 1)
+  assert.equal(starts[0].body.session_id, 'session-resume')
+  assert.equal(starts[0].body.cwd, '/repo')
+  await h.close()
+})
+
+test('compaction is not a new session, and subagents are skipped', async () => {
+  const h = harness({ roots: [{ id: 'session-root' }] })
+  const baseUrl = await h.url()
+  apply(h.ctx, { serverUrl: baseUrl, dataDir: h.dir, timeoutMs: 500 })
+
+  h.handlers.get('agent/created')({ agent: { id: 'session-root' }, source: 'compact' })
+  h.handlers.get('agent/created')({ agent: { id: 'session-child' }, source: 'startup' })
+  await flush()
+
+  assert.equal(h.received.length, 0)
+  await h.close()
+})
+
+test('a durability flush registers a session that no creation seam reached', async () => {
+  const h = harness()
+  const baseUrl = await h.url()
+  apply(h.ctx, { serverUrl: baseUrl, dataDir: h.dir, timeoutMs: 500 })
+
+  h.handlers.get('session/flush')({ id: 'session-flushed' })
+  h.handlers.get('session/flush')({ id: 'session-flushed' })
+  await flush()
+
+  const starts = h.received.filter((entry) => entry.url.includes('session-start'))
+  assert.equal(starts.length, 1)
+  assert.equal(starts[0].body.cwd, '/repo')
+  await h.close()
 })

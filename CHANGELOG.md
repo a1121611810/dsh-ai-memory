@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0
+
+- A restored session is captured again. The desktop app resumes sessions without announcing
+  `session/created`, so the agent seam and the durability flush now open a session too, and a
+  session is still announced exactly once.
+- Subagent agents and compaction restarts are not mistaken for new sessions.
+
 ## 0.3.0
 
 - Every session carries a short note explaining that ai-memory is shared but filed per

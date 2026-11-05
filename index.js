@@ -194,14 +194,14 @@ export function apply(ctx, config) {
     })
   }
 
-  const opened = (session) => {
-    const sessionId = session?.id
-    if (typeof sessionId !== 'string' || sessionId === '' || closedSessions.has(sessionId)) return
-    const cwd = cwdOf(session)
-    if (cwd === null) return
+  const open = (sessionId, cwd) => {
+    if (typeof sessionId !== 'string' || sessionId === '') return
+    if (cwd === null || closedSessions.has(sessionId) || openSessions.has(sessionId)) return
     openSessions.set(sessionId, cwd)
     send('session-start', sessionId, cwd)
   }
+
+  const opened = (session) => open(session?.id, cwdOf(session))
 
   const closed = (sessionId, cwd = null) => {
     if (typeof sessionId !== 'string' || sessionId === '' || closedSessions.has(sessionId)) return
@@ -225,6 +225,36 @@ export function apply(ctx, config) {
   // app announces `session/disposed`, while a one-shot run only emits
   // `agent/disposed` before exit. Both close the same session exactly once.
   on('session/created', (session) => opened(session))
+  // A resumed session does not always announce session/created (the desktop
+  // app restores it instead), so the agent seam opens it as well.
+  on('agent/created', (payload) => {
+    const source = payload?.source
+    if (source !== 'startup' && source !== 'resume') return
+    const agent = payload?.agent
+    const sessionId = agent?.id
+    if (typeof sessionId !== 'string' || sessionId === '') return
+    if (openSessions.has(sessionId) || closedSessions.has(sessionId)) return
+    const agents = ctx.get('agents')
+    try {
+      const roots = typeof agents?.roots === 'function' ? agents.roots() : null
+      if (Array.isArray(roots) && roots.length > 0 && !roots.some((root) => root?.id === sessionId)) return
+    } catch {
+      // A missing registry only costs the subagent filter.
+    }
+    void (async () => {
+      let cwd = null
+      try {
+        const workingDirectory = ctx.get('workingDirectory')
+        if (workingDirectory && typeof workingDirectory.ensure === 'function') cwd = await workingDirectory.ensure(agent)
+      } catch {
+        cwd = null
+      }
+      open(sessionId, typeof cwd === 'string' && cwd !== '' ? cwd : null)
+    })()
+  })
+  // Durability checkpoints are the last seam: any session that stores anything
+  // gets registered even when neither creation seam reached us.
+  on('session/flush', (session) => opened(session))
   on('session/disposed', (session) => closed(session?.id, cwdOf(session)))
   on('agent/disposed', (payload) => closed(payload?.agent?.id))
 

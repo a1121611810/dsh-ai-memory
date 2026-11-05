@@ -40,7 +40,7 @@ Restart the app after installation. The plugin activates for every session in th
 
 | DSH moment | Sent to ai-memory |
 |---|---|
-| `session/created` | `session-start` with the real session id and working directory |
+| `session/created`, a resumed `agent/created`, or the first `session/flush` | `session-start` with the real session id and working directory, exactly once per session |
 | `agent/inbox/claimed` | `user-prompt` (opt-in, off by default) |
 | `tools/result` | `post-tool-use` with the tool name, clipped input and clipped result |
 | `agent/turn-stopping` | `stop` |
