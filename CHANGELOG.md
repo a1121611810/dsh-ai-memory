@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0
+
+- A session is opened by its first agent activity (prompt, tool result, turn end), not only by
+  a creation seam. The desktop app restores sessions without announcing `session/created`,
+  `agent/created` or `session/flush`, which left a restarted session invisible.
+- Subagents are captured as their own sessions: an agent carries no parent marker, and losing a
+  real session is worse than an extra one.
+
 ## 0.4.0
 
 - A restored session is captured again. The desktop app resumes sessions without announcing

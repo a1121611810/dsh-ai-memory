@@ -268,16 +268,29 @@ test('a resumed agent opens the session when creation never announced it', async
   await h.close()
 })
 
-test('compaction is not a new session, and subagents are skipped', async () => {
-  const h = harness({ roots: [{ id: 'session-root' }] })
+test('compaction is not a new session', async () => {
+  const h = harness()
   const baseUrl = await h.url()
   apply(h.ctx, { serverUrl: baseUrl, dataDir: h.dir, timeoutMs: 500 })
 
   h.handlers.get('agent/created')({ agent: { id: 'session-root' }, source: 'compact' })
-  h.handlers.get('agent/created')({ agent: { id: 'session-child' }, source: 'startup' })
   await flush()
 
   assert.equal(h.received.length, 0)
+  await h.close()
+})
+
+test('any agent activity opens a session that the creation seams missed', async () => {
+  const h = harness()
+  const baseUrl = await h.url()
+  apply(h.ctx, { serverUrl: baseUrl, dataDir: h.dir, timeoutMs: 500 })
+
+  h.handlers.get('agent/turn-stopping')({ agent: { id: 'session-late' }, turn: 1 })
+  await flush()
+
+  assert.equal(h.received.length, 2)
+  assert.match(h.received[0].url, /event=session-start/)
+  assert.match(h.received[1].url, /event=stop/)
   await h.close()
 })
 

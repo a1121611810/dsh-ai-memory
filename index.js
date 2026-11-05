@@ -203,6 +203,29 @@ export function apply(ctx, config) {
 
   const opened = (session) => open(session?.id, cwdOf(session))
 
+  /**
+   * Some desktop restores reach none of the creation seams, so any activity
+   * that carries an agent opens its session first. Every later event for that
+   * session then has a working directory to attach to.
+   */
+  const ensureOpen = async (agent) => {
+    const sessionId = agent?.id
+    if (typeof sessionId !== 'string' || sessionId === '') return null
+    const known = openSessions.get(sessionId)
+    if (known !== undefined) return known
+    if (closedSessions.has(sessionId)) return null
+    let cwd = null
+    try {
+      const workingDirectory = ctx.get('workingDirectory')
+      if (workingDirectory && typeof workingDirectory.ensure === 'function') cwd = await workingDirectory.ensure(agent)
+    } catch {
+      cwd = null
+    }
+    if (typeof cwd !== 'string' || cwd === '') return null
+    open(sessionId, cwd)
+    return openSessions.get(sessionId) ?? null
+  }
+
   const closed = (sessionId, cwd = null) => {
     if (typeof sessionId !== 'string' || sessionId === '' || closedSessions.has(sessionId)) return
     const resolved = cwd ?? openSessions.get(sessionId) ?? null
@@ -234,13 +257,6 @@ export function apply(ctx, config) {
     const sessionId = agent?.id
     if (typeof sessionId !== 'string' || sessionId === '') return
     if (openSessions.has(sessionId) || closedSessions.has(sessionId)) return
-    const agents = ctx.get('agents')
-    try {
-      const roots = typeof agents?.roots === 'function' ? agents.roots() : null
-      if (Array.isArray(roots) && roots.length > 0 && !roots.some((root) => root?.id === sessionId)) return
-    } catch {
-      // A missing registry only costs the subagent filter.
-    }
     void (async () => {
       let cwd = null
       try {
@@ -262,11 +278,11 @@ export function apply(ctx, config) {
   // produces, and capture must be an explicit choice.
   const seenPrompts = new Set()
   on('agent/inbox/claimed', (payload) => {
-    if (settings.capturePrompt !== true) return
-    const sessionId = payload?.agent?.id
-    const cwd = openSessions.get(sessionId)
-    if (cwd === undefined) return
-    const text = messageText(payload?.message)
+    void (async () => {
+      const cwd = await ensureOpen(payload?.agent)
+      if (cwd === null || settings.capturePrompt !== true) return
+      const sessionId = payload.agent.id
+      const text = messageText(payload?.message)
     if (text === '') return
     const promptId = payload?.message?.id
     if (typeof promptId === 'string') {
@@ -274,36 +290,38 @@ export function apply(ctx, config) {
       seenPrompts.add(promptId)
       if (seenPrompts.size > 200) seenPrompts.delete(seenPrompts.values().next().value)
     }
-    const clipped = clipText(redactSecrets(text), settings.maxPromptChars)
-    send('user-prompt', sessionId, cwd, { prompt: clipped.value })
+      const clipped = clipText(redactSecrets(text), settings.maxPromptChars)
+      send('user-prompt', sessionId, cwd, { prompt: clipped.value })
+    })()
   })
 
   on('tools/result', (exec, result) => {
-    if (settings.captureTools !== true) return
-    const sessionId = exec?.agent?.id
-    const cwd = openSessions.get(sessionId)
-    if (cwd === undefined) return
-    const text = Array.isArray(result?.content)
+    void (async () => {
+      const cwd = await ensureOpen(exec?.agent)
+      if (cwd === null || settings.captureTools !== true) return
+      const sessionId = exec.agent.id
+      const text = Array.isArray(result?.content)
       ? result.content.filter((block) => block?.type === 'text').map((block) => block.text).join('\n')
       : ''
-    const clipped = clipText(redactSecrets(text), settings.maxToolChars)
-    send('post-tool-use', sessionId, cwd, {
-      toolName: typeof exec?.name === 'string' ? exec.name : 'unknown',
-      toolInput: redactDeep(clipJson(exec?.arguments, settings.maxToolChars)),
-      toolResponse: {
-        is_error: result?.isError === true,
-        text: clipped.value,
-        ...(clipped.clipped ? { text_truncated: true } : {}),
-      },
-    })
+      const clipped = clipText(redactSecrets(text), settings.maxToolChars)
+      send('post-tool-use', sessionId, cwd, {
+        toolName: typeof exec?.name === 'string' ? exec.name : 'unknown',
+        toolInput: redactDeep(clipJson(exec?.arguments, settings.maxToolChars)),
+        toolResponse: {
+          is_error: result?.isError === true,
+          text: clipped.value,
+          ...(clipped.clipped ? { text_truncated: true } : {}),
+        },
+      })
+    })()
   })
 
   on('agent/turn-stopping', (payload) => {
-    if (settings.captureStop !== true) return
-    const sessionId = payload?.agent?.id
-    const cwd = openSessions.get(sessionId)
-    if (cwd === undefined) return
-    send('stop', sessionId, cwd)
+    void (async () => {
+      const cwd = await ensureOpen(payload?.agent)
+      if (cwd === null || settings.captureStop !== true) return
+      send('stop', payload.agent.id, cwd)
+    })()
   })
 
   // Read-only overview behind the sidebar panel. A route keeps the browser half
