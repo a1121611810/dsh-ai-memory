@@ -33,6 +33,10 @@
   ],
   "license": "MIT",
   "scripts": {
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "check": "node --check index.js"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.4"
   }
 }

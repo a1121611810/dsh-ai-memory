@@ -10,8 +10,12 @@
  */
 import { appendFileSync } from 'node:fs'
 
-import { normalizeBaseUrl, readToken, resolveDataDir } from './lib/paths.js'
+import z from '@deepseek-ai/schemastery'
+
 import { buildHookPayload, clipJson, clipText, postHook } from './lib/hook.js'
+import { normalizeBaseUrl, readToken, resolveDataDir } from './lib/paths.js'
+import { createSender } from './lib/queue.js'
+import { redactDeep, redactSecrets } from './lib/redact.js'
 
 export const name = 'dsh-ai-memory'
 
@@ -27,6 +31,37 @@ export const DEFAULTS = Object.freeze({
   captureStop: true,
   maxPromptChars: 4000,
   maxToolChars: 2000,
+  maxInflight: 4,
+  cooldownMs: 30000,
+})
+
+export const Config = z.object({
+  serverUrl: z.string().default(DEFAULTS.serverUrl)
+    .description('ai-memory base URL. Loopback only unless allowRemote is set.'),
+  dataDir: z.string().default(DEFAULTS.dataDir)
+    .description('ai-memory data directory; empty means the platform default.'),
+  agent: z.string().default(DEFAULTS.agent)
+    .description('Agent label ai-memory records for these events.'),
+  allowRemote: z.boolean().default(DEFAULTS.allowRemote)
+    .description('Permit a non-loopback serverUrl. It must then use https.'),
+  timeoutMs: z.number().min(100).max(60000).default(DEFAULTS.timeoutMs)
+    .description('Per-request timeout in milliseconds.'),
+  captureSession: z.boolean().default(DEFAULTS.captureSession)
+    .description('Forward session start and end.'),
+  capturePrompt: z.boolean().default(DEFAULTS.capturePrompt)
+    .description('Forward user prompt text. Off by default: prompts are the most sensitive input.'),
+  captureTools: z.boolean().default(DEFAULTS.captureTools)
+    .description('Forward tool results, clipped to maxToolChars.'),
+  captureStop: z.boolean().default(DEFAULTS.captureStop)
+    .description('Forward a stop event at the end of each turn.'),
+  maxPromptChars: z.number().min(0).max(20000).default(DEFAULTS.maxPromptChars)
+    .description('Prompt text budget in characters.'),
+  maxToolChars: z.number().min(0).max(20000).default(DEFAULTS.maxToolChars)
+    .description('Tool input and result budget in characters.'),
+  maxInflight: z.number().min(1).max(32).default(DEFAULTS.maxInflight)
+    .description('Concurrent ingest requests.'),
+  cooldownMs: z.number().min(0).max(600000).default(DEFAULTS.cooldownMs)
+    .description('How long to stop sending after repeated failures.'),
 })
 
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -54,7 +89,18 @@ function trace(event, sessionId) {
 }
 
 export function apply(ctx, config) {
-  const settings = { ...DEFAULTS, ...(isObject(config) ? config : {}) }
+  let settings
+  try {
+    settings = Config(isObject(config) ? config : {})
+  } catch (error) {
+    try {
+      ctx.logger?.warn?.(`[dsh-ai-memory] disabled: invalid config (${error?.message ?? error})`)
+    } catch {
+      // Nothing else to do at this point.
+    }
+    return
+  }
+
   const log = (level, message) => {
     try {
       ctx.logger?.[level]?.(`[dsh-ai-memory] ${message}`)
@@ -76,10 +122,13 @@ export function apply(ctx, config) {
     : resolveDataDir()
   const token = readToken(dataDir)
   if (token === null) {
-    log('warn', `no readable bearer token under "${dataDir}"; ingest will be rejected unless the server allows it`)
+    log('warn', `no readable bearer token under "${dataDir}"; ingest will be rejected`)
   }
 
-  const stats = { sent: 0, failed: 0, skipped: 0 }
+  const sender = createSender({
+    maxInflight: settings.maxInflight,
+    cooldownMs: settings.cooldownMs,
+  })
   let warnedFailure = false
   const disposers = []
   // Session id -> cwd, so a session can be closed from an event that only
@@ -107,27 +156,23 @@ export function apply(ctx, config) {
     try {
       payload = buildHookPayload(event, { sessionId, cwd, ...fields })
     } catch {
-      stats.skipped += 1
       return
     }
     trace(event, payload.session_id)
-    void postHook({
-      baseUrl,
-      token,
-      event,
-      payload,
-      agent: settings.agent,
-      timeoutMs: settings.timeoutMs,
-    }).then((result) => {
-      if (result.ok) {
-        stats.sent += 1
-        return
-      }
-      stats.failed += 1
-      if (!warnedFailure) {
+    sender.enqueue(async () => {
+      const result = await postHook({
+        baseUrl,
+        token,
+        event,
+        payload,
+        agent: settings.agent,
+        timeoutMs: settings.timeoutMs,
+      })
+      if (!result.ok && !warnedFailure) {
         warnedFailure = true
         log('warn', `ingest failed (status ${result.status || 'unreachable'}); capture continues silently`)
       }
+      return result
     })
   }
 
@@ -135,10 +180,7 @@ export function apply(ctx, config) {
     const sessionId = session?.id
     if (typeof sessionId !== 'string' || sessionId === '' || closedSessions.has(sessionId)) return
     const cwd = cwdOf(session)
-    if (cwd === null) {
-      stats.skipped += 1
-      return
-    }
+    if (cwd === null) return
     openSessions.set(sessionId, cwd)
     send('session-start', sessionId, cwd)
   }
@@ -184,7 +226,8 @@ export function apply(ctx, config) {
       seenPrompts.add(promptId)
       if (seenPrompts.size > 200) seenPrompts.delete(seenPrompts.values().next().value)
     }
-    send('user-prompt', sessionId, cwd, { prompt: clipText(text, settings.maxPromptChars).value })
+    const clipped = clipText(redactSecrets(text), settings.maxPromptChars)
+    send('user-prompt', sessionId, cwd, { prompt: clipped.value })
   })
 
   on('tools/result', (exec, result) => {
@@ -195,10 +238,10 @@ export function apply(ctx, config) {
     const text = Array.isArray(result?.content)
       ? result.content.filter((block) => block?.type === 'text').map((block) => block.text).join('\n')
       : ''
-    const clipped = clipText(text, settings.maxToolChars)
+    const clipped = clipText(redactSecrets(text), settings.maxToolChars)
     send('post-tool-use', sessionId, cwd, {
       toolName: typeof exec?.name === 'string' ? exec.name : 'unknown',
-      toolInput: clipJson(exec?.arguments, settings.maxToolChars),
+      toolInput: redactDeep(clipJson(exec?.arguments, settings.maxToolChars)),
       toolResponse: {
         is_error: result?.isError === true,
         text: clipped.value,
@@ -214,6 +257,19 @@ export function apply(ctx, config) {
     if (cwd === undefined) return
     send('stop', sessionId, cwd)
   })
+
+  // A reachability probe is best-effort and never blocks activation.
+  void (async () => {
+    try {
+      const response = await fetch(`${baseUrl}/healthz`, {
+        signal: AbortSignal.timeout(Math.min(settings.timeoutMs, 1500)),
+      })
+      if (response.ok) log('debug', `ai-memory reachable at ${baseUrl}`)
+      else log('warn', `ai-memory answered ${response.status} at ${baseUrl}`)
+    } catch {
+      log('debug', `ai-memory is not reachable at ${baseUrl}; capture will be dropped until it is`)
+    }
+  })()
 
   log('info', `capturing into ${baseUrl}`)
 

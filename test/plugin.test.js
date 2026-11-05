@@ -12,6 +12,10 @@ function harness({ token = 'tok' } = {}) {
   if (token !== null) writeFileSync(join(dir, 'auth-token'), `${token}\n`)
   const received = []
   const server = createServer((request, response) => {
+    if (request.method !== 'POST') {
+      response.writeHead(200, { 'content-type': 'application/json' }).end('{"status":"ok"}')
+      return
+    }
     let body = ''
     request.setEncoding('utf8')
     request.on('data', (chunk) => { body += chunk })
