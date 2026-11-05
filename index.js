@@ -13,6 +13,7 @@ import { appendFileSync } from 'node:fs'
 import z from '@deepseek-ai/schemastery'
 
 import { buildHookPayload, clipJson, clipText, postHook } from './lib/hook.js'
+import { buildOverview } from './lib/mcp.js'
 import { normalizeBaseUrl, readToken, resolveDataDir } from './lib/paths.js'
 import { createSender } from './lib/queue.js'
 import { redactDeep, redactSecrets } from './lib/redact.js'
@@ -257,6 +258,38 @@ export function apply(ctx, config) {
     if (cwd === undefined) return
     send('stop', sessionId, cwd)
   })
+
+  // Read-only overview behind the sidebar panel. A route keeps the browser half
+  // free of tokens: only the Host process talks to ai-memory.
+  const overviewHandler = async () => {
+    try {
+      const overview = await buildOverview({ baseUrl, token, timeoutMs: settings.timeoutMs })
+      return Response.json(overview, { headers: { 'cache-control': 'no-store' } })
+    } catch (error) {
+      return Response.json(
+        { ok: false, error: String(error?.message ?? error) },
+        { headers: { 'cache-control': 'no-store' } },
+      )
+    }
+  }
+
+  try {
+    ctx.inject(['connection'], (scope) => {
+      const connection = scope.get('connection')
+      const register = connection && connection.fetch && typeof connection.fetch.register === 'function'
+        ? connection.fetch.register.bind(connection.fetch)
+        : undefined
+      if (register === undefined) return
+      scope.effect(() => register({
+        path: '/api/dsh-ai-memory/overview',
+        methods: ['POST'],
+        requestBody: 'buffered',
+        fetch: overviewHandler,
+      }, 'dsh-ai-memory: overview route'))
+    })
+  } catch (error) {
+    log('warn', `overview route unavailable: ${error?.message ?? error}`)
+  }
 
   // A reachability probe is best-effort and never blocks activation.
   void (async () => {

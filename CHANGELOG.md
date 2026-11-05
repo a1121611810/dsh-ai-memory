@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0
+
+- A sidebar entry and panel: server status, the resolved project, counters and the
+  most recently updated pages, read through one Host route so the browser never sees
+  the bearer token.
+
 ## 0.1.0
 
 First release.

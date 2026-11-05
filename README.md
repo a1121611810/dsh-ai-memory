@@ -49,6 +49,15 @@ Restart the app after installation. The plugin activates for every session in th
 Capture is best effort. If ai-memory is down, events are dropped; the session is never delayed,
 retried in the background, or blocked.
 
+## Sidebar panel
+
+The plugin adds an **ai-memory** entry to the left rail. It opens a read-only panel with the server
+status, the project ai-memory resolves for the current slot, its counters, and the pages updated most
+recently. The panel talks to one Host route (`POST /api/dsh-ai-memory/overview`); the browser never
+receives the bearer token.
+
+Restart the app after installing: the browser half is loaded at boot.
+
 ## Configuration
 
 Set these on the plugin row (`cordis.patch.yml` or the row's configuration page):
