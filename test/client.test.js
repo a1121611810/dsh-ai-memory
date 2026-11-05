@@ -91,7 +91,7 @@ test('both components render without throwing', async () => {
   const panel = registered.find((entry) => entry.options.name === 'main').component
   const tree = panel()
   assert.equal(tree.type, 'div')
-  assert.equal(tree.props.className, 'aim-panel')
+  assert.equal(tree.props.className, 'aim-root')
   const serialized = JSON.stringify(tree)
   assert.match(serialized, /ai-memory/)
   assert.match(serialized, /Refresh/)

@@ -13,7 +13,7 @@ import { appendFileSync } from 'node:fs'
 import z from '@deepseek-ai/schemastery'
 
 import { buildHookPayload, clipJson, clipText, postHook } from './lib/hook.js'
-import { buildOverview } from './lib/mcp.js'
+import { buildOverview, search } from './lib/mcp.js'
 import { normalizeBaseUrl, readToken, resolveDataDir } from './lib/paths.js'
 import { createSender } from './lib/queue.js'
 import { redactDeep, redactSecrets } from './lib/redact.js'
@@ -324,17 +324,55 @@ export function apply(ctx, config) {
     })()
   })
 
-  // Read-only overview behind the sidebar panel. A route keeps the browser half
+  // Read-only routes behind the sidebar panel. A route keeps the browser half
   // free of tokens: only the Host process talks to ai-memory.
-  const overviewHandler = async () => {
+  const jsonResponse = (payload, status = 200) => Response.json(payload, {
+    status,
+    headers: { 'cache-control': 'no-store' },
+  })
+  const readJson = async (request) => {
     try {
-      const overview = await buildOverview({ baseUrl, token, timeoutMs: settings.timeoutMs })
-      return Response.json(overview, { headers: { 'cache-control': 'no-store' } })
+      const body = await request.json()
+      return isObject(body) ? body : {}
+    } catch {
+      return {}
+    }
+  }
+  const scopeOf = (body) => (typeof body?.project === 'string' && body.project !== ''
+    ? { workspace: typeof body.workspace === 'string' && body.workspace !== '' ? body.workspace : 'default', project: body.project }
+    : null)
+
+  const overviewHandler = async (request) => {
+    try {
+      const body = await readJson(request)
+      const overview = await buildOverview({
+        baseUrl,
+        token,
+        scope: scopeOf(body),
+        timeoutMs: settings.timeoutMs,
+      })
+      return jsonResponse(overview)
     } catch (error) {
-      return Response.json(
-        { ok: false, error: String(error?.message ?? error) },
-        { headers: { 'cache-control': 'no-store' } },
-      )
+      return jsonResponse({ ok: false, error: String(error?.message ?? error) })
+    }
+  }
+
+  const searchHandler = async (request) => {
+    try {
+      const body = await readJson(request)
+      const q = typeof body.q === 'string' ? body.q.trim() : ''
+      if (q === '') return jsonResponse({ ok: true, hits: [] })
+      const hits = await search({
+        baseUrl,
+        token,
+        q,
+        scope: scopeOf(body),
+        global: body.global === true,
+        timeoutMs: Math.max(settings.timeoutMs, 4000),
+      })
+      return jsonResponse({ ok: true, hits })
+    } catch (error) {
+      return jsonResponse({ ok: false, error: String(error?.message ?? error) })
     }
   }
 
@@ -345,12 +383,11 @@ export function apply(ctx, config) {
         ? connection.fetch.register.bind(connection.fetch)
         : undefined
       if (register === undefined) return
-      scope.effect(() => register({
-        path: '/api/dsh-ai-memory/overview',
-        methods: ['POST'],
-        requestBody: 'buffered',
-        fetch: overviewHandler,
-      }, 'dsh-ai-memory: overview route'))
+      const route = (path, handler, label) => scope.effect(
+        () => register({ path, methods: ['POST'], requestBody: 'buffered', fetch: handler }, label),
+      )
+      route('/api/dsh-ai-memory/overview', overviewHandler, 'dsh-ai-memory: overview route')
+      route('/api/dsh-ai-memory/search', searchHandler, 'dsh-ai-memory: search route')
     })
   } catch (error) {
     log('warn', `overview route unavailable: ${error?.message ?? error}`)

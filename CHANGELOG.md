@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.0
+
+- The sidebar panel is a memory browser: every project that holds pages, one project's snapshot
+  (counters, 7-day activity, open handoffs, messages, rules), its recent pages, and a search box
+  that can reach across projects.
+- Two read-only Host routes back it: `overview` and `search`.
+
 ## 0.5.1
 
 - Revert the default agent label to `claude-code`. ai-memory binds the agent kind to a session id

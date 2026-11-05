@@ -51,10 +51,17 @@ retried in the background, or blocked.
 
 ## Sidebar panel
 
-The plugin adds an **ai-memory** entry to the left rail. It opens a read-only panel with the server
-status, the project ai-memory resolves for the current slot, its counters, and the pages updated most
-recently. The panel talks to one Host route (`POST /api/dsh-ai-memory/overview`); the browser never
-receives the bearer token.
+The plugin adds an **ai-memory** entry to the left rail. It opens a memory browser:
+
+- **Left**: every project that holds at least one page, newest first, with its page count. The
+  session's own project is pinned at the top. Filter by name.
+- **Right**: the selected project's counters, 7-day activity, open handoffs, pending messages,
+  rules, and its most recently updated pages.
+- **Search**: full-text search inside the selected project, or across every project with the
+  **全局** switch.
+
+Two read-only Host routes back the panel (`overview`, `search`); the browser never receives the
+bearer token.
 
 Restart the app after installing: the browser half is loaded at boot.
 
