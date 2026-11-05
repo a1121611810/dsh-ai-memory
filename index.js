@@ -358,18 +358,39 @@ export function apply(ctx, config) {
   }
 
   const settingsKeys = Object.keys(DEFAULTS)
+  // `ctx.fiber.entry` is the documented handle; the editor's own inventory is a
+  // tolerant fallback for builds that do not expose it on the plugin context.
+  const settingsEntry = () => {
+    try {
+      if (ctx.fiber?.entry) return ctx.fiber.entry
+    } catch {
+      // Fall through to the inventory.
+    }
+    try {
+      const rows = ctx.get('configEditor')?.configuration?.() ?? []
+      for (const row of rows) {
+        const entry = row?.entry
+        if (!entry) continue
+        const patchId = entry.patch?.id ?? entry.patchId
+        if (patchId === 'ai-memory-sync' || entry.name === 'dsh-ai-memory') return entry
+      }
+    } catch {
+      // No editor inventory either.
+    }
+    return undefined
+  }
   const readSettings = () => {
     try {
-      const entry = ctx.fiber?.entry
+      const entry = settingsEntry()
       const config = isObject(entry?.config) ? entry.config : {}
-      return { ok: true, entryId: entry?.id ?? null, config, editable: Boolean(ctx.get('configEditor')) }
+      return { ok: true, entryId: entry?.id ?? null, config, editable: Boolean(entry) && Boolean(ctx.get('configEditor')) }
     } catch {
       return { ok: true, entryId: null, config: {}, editable: false }
     }
   }
   const saveSettings = async (patch) => {
     const editor = ctx.get('configEditor')
-    const entry = ctx.fiber?.entry
+    const entry = settingsEntry()
     if (!editor || !entry) return { ok: false, error: 'configuration cannot be saved in this profile' }
     const candidate = {}
     for (const key of settingsKeys) if (Object.hasOwn(patch, key)) candidate[key] = patch[key]

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.1
+
+- Settings resolve the plugin row from `ctx.fiber.entry`, falling back to the config editor's
+  inventory, so the editable/read-only state is accurate on builds that hide the fiber handle.
+
 ## 0.7.0
 
 - Pages and hits now show where they came from: the owning project on every search result, the
