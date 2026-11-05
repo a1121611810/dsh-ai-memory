@@ -89,7 +89,7 @@ function fakeAiMemory() {
   }
 }
 
-function harness(baseUrl, { editor = null, mcp = true, instructions = false, overrides = {} } = {}) {
+function harness(baseUrl, { editor = null, mcp = true, instructions = false, overrides = {}, connection = true } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-ai-memory-route-'))
   writeFileSync(join(dir, 'auth-token'), 'tok\n')
   const workspace = mkdtempSync(join(tmpdir(), 'dsh-ai-memory-ws-'))
@@ -109,6 +109,7 @@ function harness(baseUrl, { editor = null, mcp = true, instructions = false, ove
     logger: { info() {}, warn() {}, debug() {} },
     fiber: { entry: { id: 'ai-memory-sync', config: { serverUrl: baseUrl, capturePrompt: false } } },
     inject: (deps, callback) => {
+      if (!connection) return
       callback({
         get: (name) => (name === 'connection'
           ? { fetch: { register: (route) => { routes.set(route.path, route); return () => {} } } }
@@ -247,7 +248,10 @@ test('a broken server is reported, not thrown', async () => {
 
 test('setup reports the missing pieces of a fresh install', async () => {
   const server = fakeAiMemory()
-  const h = harness(await server.url(), { mcp: false, instructions: false })
+  // Keep the check off the real home directory: ~/.agents/AGENTS.md may already
+  // carry the marker on this machine.
+  const missing = join(mkdtempSync(join(tmpdir(), 'dsh-ai-memory-rules-')), 'AGENTS.md')
+  const h = harness(await server.url(), { mcp: false, overrides: { instructionsPath: missing } })
 
   const body = await (await h.routes.get('/api/dsh-ai-memory/overview').fetch(request({}))).json()
   assert.equal(body.setup.mcp, false)
@@ -333,6 +337,16 @@ test('the install check follows the configured rules file', async () => {
   const body = await (await h.routes.get('/api/dsh-ai-memory/overview').fetch(request({}))).json()
   assert.equal(body.setup.instructions, true)
   assert.deepEqual(body.setup.instructionFiles, [target])
+
+  h.dispose()
+  await server.close()
+})
+
+test('without a connection service no route is registered at all', async () => {
+  const server = fakeAiMemory()
+  const h = harness(await server.url(), { connection: false })
+
+  assert.equal(h.routes.size, 0, 'fail closed: no endpoint to reach unauthenticated')
 
   h.dispose()
   await server.close()
