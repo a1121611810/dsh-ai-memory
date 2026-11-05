@@ -11,7 +11,7 @@
 import { appendFileSync } from 'node:fs'
 
 import { normalizeBaseUrl, readToken, resolveDataDir } from './lib/paths.js'
-import { buildHookPayload, postHook } from './lib/hook.js'
+import { buildHookPayload, clipJson, clipText, postHook } from './lib/hook.js'
 
 export const name = 'dsh-ai-memory'
 
@@ -22,9 +22,25 @@ export const DEFAULTS = Object.freeze({
   allowRemote: false,
   timeoutMs: 3000,
   captureSession: true,
+  capturePrompt: false,
+  captureTools: true,
+  captureStop: true,
+  maxPromptChars: 4000,
+  maxToolChars: 2000,
 })
 
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value)
+
+/** Join the text blocks of one user message; reasoning and images are ignored. */
+function messageText(message) {
+  const content = message?.content
+  if (!Array.isArray(content)) return ''
+  return content
+    .filter((block) => block?.type === 'text' && typeof block.text === 'string')
+    .map((block) => block.text)
+    .join('\n')
+    .trim()
+}
 
 /** Env-gated event trace: a support aid that never runs unless asked for. */
 function trace(event, sessionId) {
@@ -85,11 +101,11 @@ export function apply(ctx, config) {
     return typeof cwd === 'string' && cwd !== '' ? cwd : null
   }
 
-  const send = (event, sessionId, cwd) => {
+  const send = (event, sessionId, cwd, fields = {}) => {
     if (settings.captureSession !== true) return
     let payload
     try {
-      payload = buildHookPayload(event, { sessionId, cwd })
+      payload = buildHookPayload(event, { sessionId, cwd, ...fields })
     } catch {
       stats.skipped += 1
       return
@@ -151,6 +167,53 @@ export function apply(ctx, config) {
   on('session/created', (session) => opened(session))
   on('session/disposed', (session) => closed(session?.id, cwdOf(session)))
   on('agent/disposed', (payload) => closed(payload?.agent?.id))
+
+  // Prompt text is off by default: it is the most sensitive thing a session
+  // produces, and capture must be an explicit choice.
+  const seenPrompts = new Set()
+  on('agent/inbox/claimed', (payload) => {
+    if (settings.capturePrompt !== true) return
+    const sessionId = payload?.agent?.id
+    const cwd = openSessions.get(sessionId)
+    if (cwd === undefined) return
+    const text = messageText(payload?.message)
+    if (text === '') return
+    const promptId = payload?.message?.id
+    if (typeof promptId === 'string') {
+      if (seenPrompts.has(promptId)) return
+      seenPrompts.add(promptId)
+      if (seenPrompts.size > 200) seenPrompts.delete(seenPrompts.values().next().value)
+    }
+    send('user-prompt', sessionId, cwd, { prompt: clipText(text, settings.maxPromptChars).value })
+  })
+
+  on('tools/result', (exec, result) => {
+    if (settings.captureTools !== true) return
+    const sessionId = exec?.agent?.id
+    const cwd = openSessions.get(sessionId)
+    if (cwd === undefined) return
+    const text = Array.isArray(result?.content)
+      ? result.content.filter((block) => block?.type === 'text').map((block) => block.text).join('\n')
+      : ''
+    const clipped = clipText(text, settings.maxToolChars)
+    send('post-tool-use', sessionId, cwd, {
+      toolName: typeof exec?.name === 'string' ? exec.name : 'unknown',
+      toolInput: clipJson(exec?.arguments, settings.maxToolChars),
+      toolResponse: {
+        is_error: result?.isError === true,
+        text: clipped.value,
+        ...(clipped.clipped ? { text_truncated: true } : {}),
+      },
+    })
+  })
+
+  on('agent/turn-stopping', (payload) => {
+    if (settings.captureStop !== true) return
+    const sessionId = payload?.agent?.id
+    const cwd = openSessions.get(sessionId)
+    if (cwd === undefined) return
+    send('stop', sessionId, cwd)
+  })
 
   log('info', `capturing into ${baseUrl}`)
 

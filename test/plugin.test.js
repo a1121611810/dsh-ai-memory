@@ -137,3 +137,70 @@ test('a non-loopback server without allowRemote disables the plugin', async () =
   assert.equal(handlers.size, 0)
   await h.close()
 })
+
+const openSession = (h) => h.handlers.get('session/created')({ id: 'session-x' })
+
+test('prompts stay off by default', async () => {
+  const h = harness()
+  const baseUrl = await h.url()
+  apply(h.ctx, { serverUrl: baseUrl, dataDir: h.dir, timeoutMs: 500 })
+  openSession(h)
+  h.handlers.get('agent/inbox/claimed')({
+    agent: { id: 'session-x' },
+    message: { id: 'm1', content: [{ type: 'text', text: 'secret plan' }] },
+  })
+  await flush()
+  assert.equal(h.received.filter((entry) => entry.url.includes('user-prompt')).length, 0)
+  await h.close()
+})
+
+test('capturePrompt forwards the prompt text once per message', async () => {
+  const h = harness()
+  const baseUrl = await h.url()
+  apply(h.ctx, { serverUrl: baseUrl, dataDir: h.dir, timeoutMs: 500, capturePrompt: true })
+  openSession(h)
+  const claimed = { agent: { id: 'session-x' }, message: { id: 'm1', content: [{ type: 'text', text: 'hello there' }] } }
+  h.handlers.get('agent/inbox/claimed')(claimed)
+  h.handlers.get('agent/inbox/claimed')(claimed)
+  await flush()
+
+  const prompts = h.received.filter((entry) => entry.url.includes('user-prompt'))
+  assert.equal(prompts.length, 1)
+  assert.equal(prompts[0].body.prompt, 'hello there')
+  assert.equal(prompts[0].body.hook_event_name, 'UserPromptSubmit')
+  await h.close()
+})
+
+test('tool results are forwarded with a clipped body', async () => {
+  const h = harness()
+  const baseUrl = await h.url()
+  apply(h.ctx, { serverUrl: baseUrl, dataDir: h.dir, timeoutMs: 500, maxToolChars: 40 })
+  openSession(h)
+  h.handlers.get('tools/result')(
+    { agent: { id: 'session-x' }, name: 'bash', arguments: { command: 'echo hello' } },
+    { isError: false, content: [{ type: 'text', text: 'x'.repeat(60) }] },
+  )
+  await flush()
+
+  const tool = h.received.find((entry) => entry.url.includes('post-tool-use'))
+  assert.ok(tool)
+  assert.equal(tool.body.tool_name, 'bash')
+  assert.deepEqual(tool.body.tool_input, { command: 'echo hello' })
+  assert.equal(tool.body.tool_response.text, 'x'.repeat(40))
+  assert.equal(tool.body.tool_response.text_truncated, true)
+  await h.close()
+})
+
+test('turn stopping is forwarded as a stop event', async () => {
+  const h = harness()
+  const baseUrl = await h.url()
+  apply(h.ctx, { serverUrl: baseUrl, dataDir: h.dir, timeoutMs: 500 })
+  openSession(h)
+  h.handlers.get('agent/turn-stopping')({ agent: { id: 'session-x' }, turn: 1 })
+  await flush()
+
+  const stop = h.received.find((entry) => entry.url.includes('event=stop'))
+  assert.ok(stop)
+  assert.equal(stop.body.hook_event_name, 'Stop')
+  await h.close()
+})

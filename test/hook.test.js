@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { buildHookPayload, hookUrl, postHook } from '../lib/hook.js'
+import { buildHookPayload, clipJson, clipText, hookUrl, postHook } from '../lib/hook.js'
 
 const id = 'session-abc'
 const cwd = '/repo'
@@ -101,4 +101,33 @@ test('postHook never throws on failure', async () => {
     fetchImpl: async () => { throw new Error('ECONNREFUSED') },
   })
   assert.deepEqual(thrown, { ok: false, status: 0 })
+})
+
+test('buildHookPayload carries prompt and tool fields', () => {
+  const prompt = buildHookPayload('user-prompt', { sessionId: id, cwd, prompt: 'hello' })
+  assert.equal(prompt.hook_event_name, 'UserPromptSubmit')
+  assert.equal(prompt.prompt, 'hello')
+
+  const tool = buildHookPayload('post-tool-use', {
+    sessionId: id,
+    cwd,
+    toolName: 'bash',
+    toolInput: { command: 'ls' },
+    toolResponse: { is_error: false, text: 'ok' },
+  })
+  assert.equal(tool.hook_event_name, 'PostToolUse')
+  assert.equal(tool.tool_name, 'bash')
+  assert.deepEqual(tool.tool_input, { command: 'ls' })
+  assert.deepEqual(tool.tool_response, { is_error: false, text: 'ok' })
+})
+
+test('clipText and clipJson mark what they cut', () => {
+  assert.deepEqual(clipText('abcdef', 3), { value: 'abc', clipped: true })
+  assert.deepEqual(clipText('abc', 10), { value: 'abc', clipped: false })
+  assert.deepEqual(clipText(null, 10), { value: '', clipped: false })
+
+  assert.deepEqual(clipJson({ a: 1 }, 100), { a: 1 })
+  const cut = clipJson({ long: 'x'.repeat(50) }, 10)
+  assert.equal(cut.truncated, true)
+  assert.ok(cut.preview.length <= 10)
 })
