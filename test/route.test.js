@@ -178,6 +178,11 @@ test('settings reads the row config and refuses to save without an editor', asyn
   const read = await (await settings.fetch(request({}))).json()
   assert.equal(read.entryId, 'ai-memory-sync')
   assert.equal(read.config.capturePrompt, false)
+  // The form shows effective values: defaults must be merged in, not only the
+  // explicit row config.
+  assert.equal(read.config.captureTools, true)
+  assert.equal(read.config.maxToolChars, 2000)
+  assert.equal(read.config.announceScope, true)
   assert.equal(read.editable, false)
 
   const save = await (await settings.fetch(request({ patch: { capturePrompt: true } }))).json()

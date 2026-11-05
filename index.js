@@ -382,7 +382,9 @@ export function apply(ctx, config) {
   const readSettings = () => {
     try {
       const entry = settingsEntry()
-      const config = isObject(entry?.config) ? entry.config : {}
+      // The row stores only what the user changed; the form shows the effective
+      // values, so it must start from the defaults rather than an empty object.
+      const config = { ...DEFAULTS, ...(isObject(entry?.config) ? entry.config : {}) }
       return { ok: true, entryId: entry?.id ?? null, config, editable: Boolean(entry) && Boolean(ctx.get('configEditor')) }
     } catch {
       return { ok: true, entryId: null, config: {}, editable: false }

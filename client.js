@@ -197,13 +197,16 @@ window.__ModuleLoader__.load({
           field('agent', form.agent, (v) => set('agent', v)),
           field('timeoutMs', form.timeoutMs, (v) => set('timeoutMs', v), 'number'),
           field('maxPromptChars', form.maxPromptChars, (v) => set('maxPromptChars', v), 'number'),
-          field('maxToolChars', form.maxToolChars, (v) => set('maxToolChars', v), 'number')),
+          field('maxToolChars', form.maxToolChars, (v) => set('maxToolChars', v), 'number'),
+          field('maxInflight', form.maxInflight, (v) => set('maxInflight', v), 'number'),
+          field('cooldownMs', form.cooldownMs, (v) => set('cooldownMs', v), 'number')),
         h('div', { className: 'aim-badges' },
           toggle('captureSession', form.captureSession, (v) => set('captureSession', v)),
           toggle('capturePrompt', form.capturePrompt, (v) => set('capturePrompt', v)),
           toggle('captureTools', form.captureTools, (v) => set('captureTools', v)),
           toggle('captureStop', form.captureStop, (v) => set('captureStop', v)),
-          toggle('announceScope', form.announceScope, (v) => set('announceScope', v))),
+          toggle('announceScope', form.announceScope, (v) => set('announceScope', v)),
+          toggle('allowRemote', form.allowRemote, (v) => set('allowRemote', v))),
         h('div', { className: 'aim-searchbar' },
           h('button', { className: 'aim-btn', type: 'button', onClick: props.onSave, disabled: !s.editable || props.busy },
             props.busy ? 'Saving…' : 'Save'),
@@ -284,8 +287,9 @@ window.__ModuleLoader__.load({
       const current = payload && payload.current
       const brief = payload && payload.briefing
       const allProjects = (payload && payload.projects) || []
-      const visible = allProjects.filter((entry) => filter === ''
-        || entry.project.toLowerCase().includes(filter.toLowerCase()))
+      const currentProject = current ? current.project : null
+      const visible = allProjects.filter((entry) => entry.project !== currentProject
+        && (filter === '' || entry.project.toLowerCase().includes(filter.toLowerCase())))
       const connected = Boolean(payload) && payload.server && payload.server.status === 'ok'
       const headline = selected
         ? selected.project

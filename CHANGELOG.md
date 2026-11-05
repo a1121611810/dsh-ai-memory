@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.2
+
+- The settings form now shows effective values (defaults merged with the row's config) instead of
+  empty fields, and exposes `maxInflight`, `cooldownMs` and `allowRemote` as well.
+- The project list no longer repeats the pinned current project.
+
 ## 0.7.1
 
 - Settings resolve the plugin row from `ctx.fiber.entry`, falling back to the config editor's
