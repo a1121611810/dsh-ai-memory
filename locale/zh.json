@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "ai-memory 同步",
+    "description": "把 Harness 会话按真实项目身份写入 ai-memory。"
+  }
+}

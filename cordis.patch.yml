@@ -1,0 +1,3 @@
+- insert:
+    - id: ai-memory-sync
+      name: 'dsh-ai-memory'
