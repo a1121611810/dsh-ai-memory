@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.3
+
+- Saving settings now writes only the fields that changed. Untouched fields keep following the
+  plugin's defaults, so a later default improvement still reaches you; saving with no change is a
+  no-op instead of pinning every field.
+
 ## 0.7.2
 
 - The settings form now shows effective values (defaults merged with the row's config) instead of

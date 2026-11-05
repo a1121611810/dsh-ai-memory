@@ -226,6 +226,7 @@ window.__ModuleLoader__.load({
       const [busy, setBusy] = React.useState(false)
       const [settings, setSettings] = React.useState(null)
       const [form, setForm] = React.useState({})
+      const [initial, setInitial] = React.useState({})
       const [message, setMessage] = React.useState(null)
 
       const load = React.useCallback((scope) => {
@@ -245,7 +246,10 @@ window.__ModuleLoader__.load({
         if (tab !== 'settings' || settings !== null) return
         api('settings', {}).then((payload) => {
           setSettings(payload)
-          if (payload && payload.config) setForm(payload.config)
+          if (payload && payload.config) {
+            setForm(payload.config)
+            setInitial(payload.config)
+          }
         }).catch((error) => setSettings({ ok: false, error: String(error?.message ?? error) }))
       }, [tab, settings])
 
@@ -271,9 +275,19 @@ window.__ModuleLoader__.load({
       }
 
       const save = () => {
+        // Only what actually changed is pinned; untouched fields keep following
+        // the plugin's defaults, so later default improvements still arrive.
+        const patch = {}
+        for (const key of Object.keys(form)) {
+          if (JSON.stringify(form[key]) !== JSON.stringify(initial[key])) patch[key] = form[key]
+        }
+        if (Object.keys(patch).length === 0) {
+          setMessage({ ok: true, text: '没有改动' })
+          return
+        }
         setBusy(true)
         setMessage(null)
-        api('settings', { patch: form })
+        api('settings', { patch })
           .then((payload) => {
             setMessage(payload && payload.ok
               ? { ok: true, text: '已保存，插件正在重启' }
