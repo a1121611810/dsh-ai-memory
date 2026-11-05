@@ -18,6 +18,18 @@ ai-memory needs to file a session correctly:
 This plugin is a Host half that forwards exactly those two things over ai-memory's HTTP ingest
 endpoint. It does not replace the tools: keep using the ai-memory MCP client for `memory_*` calls.
 
+## What this plugin does not do
+
+Installing it does **not** install ai-memory, does **not** configure the MCP client, and does **not**
+write rules files (`AGENTS.md` / `CLAUDE.md`). It is the sync layer only:
+
+- ai-memory itself is a separate install (a service plus a CLI). Point `serverUrl` at it.
+- The `memory_*` tools come from `@deepseek-ai/dsh-mcp-client`. Register that row yourself; the
+  plugin only captures sessions.
+- The scope note it adds is a runtime prompt section, not a file on disk.
+
+If the server is not running the panel says so and shows the setup steps; nothing is captured.
+
 ## Requirements
 
 - DeepSeek Harness 0.2.2-rc.1 or newer.

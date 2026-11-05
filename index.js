@@ -486,7 +486,7 @@ export function apply(ctx, config) {
       if (response.ok) log('debug', `ai-memory reachable at ${baseUrl}`)
       else log('warn', `ai-memory answered ${response.status} at ${baseUrl}`)
     } catch {
-      log('debug', `ai-memory is not reachable at ${baseUrl}; capture will be dropped until it is`)
+      log('warn', `ai-memory is not reachable at ${baseUrl}; nothing will be captured until it is running`)
     }
   })()
 

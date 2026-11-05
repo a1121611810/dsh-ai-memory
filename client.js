@@ -64,6 +64,12 @@ window.__ModuleLoader__.load({
       .aim-error { color: var(--dsw-alias-state-error-primary); font-size: 13px; }
       .aim-ok { color: var(--dsw-alias-state-success-primary); font-size: 12px; }
       .aim-foot { padding: 10px 22px 14px; border-top: 1px solid var(--dsw-alias-border-l1); display: flex; gap: 8px; align-items: center; }
+      .aim-setup { border: 1px solid var(--dsw-alias-state-warn-primary); border-radius: 10px; padding: 12px 14px;
+        margin-bottom: 16px; font-size: 12px; color: var(--dsw-alias-label-primary); }
+      .aim-setup h4 { margin: 0 0 6px; font-size: 13px; color: var(--dsw-alias-state-warn-primary); }
+      .aim-setup ol { margin: 6px 0 0 18px; padding: 0; color: var(--dsw-alias-label-secondary); }
+      .aim-setup li { margin: 3px 0; }
+      .aim-code { font-family: ui-monospace, monospace; font-size: 11px; color: var(--dsw-alias-label-primary); }
       .aim-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px 16px; }
       .aim-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
       .aim-field span { color: var(--dsw-alias-label-secondary); }
@@ -130,7 +136,17 @@ window.__ModuleLoader__.load({
       const rows = props.results === null ? (brief && brief.recent ? brief.recent : []) : props.results
       const empty = props.results === null ? '这个项目还没有页面。' : '没有匹配。试试勾上「全局」。'
 
+      const setup = props.connected ? null : h('div', { className: 'aim-setup' },
+        h('h4', null, 'ai-memory 未连接'),
+        h('ol', null,
+          h('li', null, '安装并启动 ai-memory（默认监听 127.0.0.1:49374）'),
+          h('li', null, '想要 memory_* 工具：运行 ',
+            h('span', { className: 'aim-code' }, 'ai-memory install-mcp --client dsh'),
+            '，把输出的 patch 合并进 profile'),
+          h('li', null, '回到这里点 Refresh')))
+
       return h(React.Fragment, null,
+        setup,
         h('div', { className: 'aim-sec' },
           h('div', { className: 'aim-h2' }, props.headline),
           h('div', { className: 'aim-meta' }, props.meta),
@@ -364,6 +380,7 @@ window.__ModuleLoader__.load({
             busy,
             onSearch: runSearch,
             projectCount: allProjects.length,
+            connected,
           })
           : h(Settings, {
             payload,

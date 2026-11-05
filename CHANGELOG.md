@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.0
+
+- Installing the plugin still does nothing to ai-memory itself; the README now says so explicitly.
+- When the server is unreachable the panel shows the three setup steps instead of an empty page, and
+  the Host logs a warning rather than a debug line.
+
 ## 0.7.3
 
 - Saving settings now writes only the fields that changed. Untouched fields keep following the
