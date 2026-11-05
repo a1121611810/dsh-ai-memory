@@ -81,6 +81,12 @@ the `mcp__ai-memory__*` tools are registered, and a rules file (`~/.agents/AGENT
 workspace's `AGENTS.md` or `CLAUDE.md`) carries the `ai-memory:start` marker. Each missing piece
 shows the command that fixes it, and a complete install shows nothing.
 
+The rules-file row has a **write** button: it fetches ai-memory's canonical block from the server
+(a local block if it is unreachable) and inserts or replaces it, touching nothing outside the
+`ai-memory:start` / `ai-memory:end` markers. The file is backed up first, and an unbalanced marker
+pair is refused rather than guessed. The MCP row has a **copy** button instead — a bundle cannot
+insert a plugin row into someone else's profile.
+
 **Settings**
 
 - The plugin's own knobs: `serverUrl`, `agent`, timeouts, capture switches, budgets. Saving goes

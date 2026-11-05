@@ -8,7 +8,7 @@
  * Everything here is best-effort. A missing server, an unreachable port, or a
  * malformed session must never disturb the agent loop.
  */
-import { appendFileSync, readFileSync } from 'node:fs'
+import { accessSync, appendFileSync, copyFileSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -37,6 +37,7 @@ export const DEFAULTS = Object.freeze({
   maxInflight: 4,
   cooldownMs: 30000,
   announceScope: true,
+  instructionsPath: '',
 })
 
 export const Config = z.object({
@@ -68,6 +69,8 @@ export const Config = z.object({
     .description('How long to stop sending after repeated failures.'),
   announceScope: z.boolean().default(DEFAULTS.announceScope)
     .description('Tell the model at every session that ai-memory is filed per project and how to search across projects.'),
+  instructionsPath: z.string().default(DEFAULTS.instructionsPath)
+    .description('Rules file the install check reads and the write button updates. Empty means ~/.agents/AGENTS.md, else the workspace AGENTS.md.'),
 })
 
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -326,6 +329,82 @@ export function apply(ctx, config) {
     })()
   })
 
+  const MARKER_START = '<!-- ai-memory:start -->'
+  const MARKER_END = '<!-- ai-memory:end -->'
+
+  const instructionTarget = () => {
+    const configured = typeof settings.instructionsPath === 'string' ? settings.instructionsPath.trim() : ''
+    if (configured !== '') return configured
+    try {
+      const global = join(homedir(), '.agents')
+      accessSync(global)
+      return join(global, 'AGENTS.md')
+    } catch {
+      // No global agents directory: fall back to the workspace.
+    }
+    try {
+      const workspace = ctx.get('workingDirectory')?.defaultDirectory
+      return typeof workspace === 'string' && workspace !== '' ? join(workspace, 'AGENTS.md') : null
+    } catch {
+      return null
+    }
+  }
+
+  const fallbackBlock = () => [MARKER_START, SCOPE_NOTE, MARKER_END].join('\n')
+
+  /** Replace or append the marker block, never touching anything else. */
+  const writeInstructions = async () => {
+    const target = instructionTarget()
+    if (target === null) return { ok: false, error: 'no rules file could be resolved' }
+
+    let block = fallbackBlock()
+    try {
+      const data = await mcpCall({
+        baseUrl,
+        token,
+        name: 'memory_install_self_routing',
+        args: { compact: true },
+        timeoutMs: settings.timeoutMs,
+      })
+      const candidate = data?.markered_block
+      if (typeof candidate === 'string' && candidate.includes(MARKER_START) && candidate.includes(MARKER_END)) {
+        block = candidate.trim()
+      }
+    } catch {
+      // The local block is a usable fallback when the server is unreachable.
+    }
+
+    let current = ''
+    let existed = false
+    try {
+      current = readFileSync(target, 'utf8')
+      existed = true
+    } catch {
+      current = ''
+    }
+
+    const start = current.indexOf(MARKER_START)
+    const end = current.indexOf(MARKER_END)
+    let next
+    let replaced = false
+    if (start >= 0 && end > start) {
+      next = current.slice(0, start) + block + current.slice(end + MARKER_END.length)
+      replaced = true
+    } else if (start >= 0 || end >= 0) {
+      return { ok: false, error: 'unbalanced ai-memory markers; fix the file by hand' }
+    } else {
+      next = current.trim() === '' ? `${block}\n` : `${current.trimEnd()}\n\n${block}\n`
+    }
+
+    try {
+      if (existed) copyFileSync(target, `${target}.bak-ai-memory-${Date.now()}`)
+      writeFileSync(target, next)
+    } catch (error) {
+      return { ok: false, error: String(error?.message ?? error) }
+    }
+    return { ok: true, path: target, replaced }
+  }
+
   const fileHasMarker = (path) => {
     try {
       return readFileSync(path, 'utf8').includes('ai-memory:start')
@@ -347,11 +426,14 @@ export function apply(ctx, config) {
         return null
       }
     })()
-    const instructionFiles = [
-      join(homedir(), '.agents', 'AGENTS.md'),
-      defaults ? join(defaults, 'AGENTS.md') : null,
-      defaults ? join(defaults, 'CLAUDE.md') : null,
-    ].filter((path) => typeof path === 'string')
+    const configured = typeof settings.instructionsPath === 'string' ? settings.instructionsPath.trim() : ''
+    const instructionFiles = configured !== ''
+      ? [configured]
+      : [
+        join(homedir(), '.agents', 'AGENTS.md'),
+        defaults ? join(defaults, 'AGENTS.md') : null,
+        defaults ? join(defaults, 'CLAUDE.md') : null,
+      ].filter((path) => typeof path === 'string')
 
     let reachable = false
     try {
@@ -468,6 +550,14 @@ export function apply(ctx, config) {
       return { ok: false, error: String(error?.message ?? error) }
     }
   }
+  const installHandler = async () => {
+    try {
+      return jsonResponse(await writeInstructions())
+    } catch (error) {
+      return jsonResponse({ ok: false, error: String(error?.message ?? error) })
+    }
+  }
+
   const settingsHandler = async (request) => {
     const body = await readJson(request)
     if (isObject(body.patch)) return jsonResponse(await saveSettings(body.patch))
@@ -506,6 +596,7 @@ export function apply(ctx, config) {
       route('/api/dsh-ai-memory/overview', overviewHandler, 'dsh-ai-memory: overview route')
       route('/api/dsh-ai-memory/search', searchHandler, 'dsh-ai-memory: search route')
       route('/api/dsh-ai-memory/settings', settingsHandler, 'dsh-ai-memory: settings route')
+      route('/api/dsh-ai-memory/install-instructions', installHandler, 'dsh-ai-memory: install route')
     })
   } catch (error) {
     log('warn', `overview route unavailable: ${error?.message ?? error}`)

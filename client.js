@@ -73,6 +73,8 @@ window.__ModuleLoader__.load({
       .aim-setup-row.todo .aim-setup-mark { color: var(--dsw-alias-state-error-primary); }
       .aim-setup-row.unknown .aim-setup-mark { color: var(--dsw-alias-label-secondary); }
       .aim-setup-hint { color: var(--dsw-alias-label-secondary); font-size: 11px; margin-top: 2px; }
+      .aim-setup-actions { display: flex; gap: 6px; margin-top: 6px; }
+      .aim-btn.mini { padding: 2px 9px; font-size: 11px; }
       .aim-code { font-family: ui-monospace, monospace; font-size: 11px; color: var(--dsw-alias-label-primary); }
       .aim-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px 16px; }
       .aim-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
@@ -138,13 +140,58 @@ window.__ModuleLoader__.load({
         h('div', null, title),
         hint ? h('div', { className: 'aim-setup-hint' }, hint) : null))
 
+    const MCP_COMMAND = 'ai-memory install-mcp --client dsh'
+
+    async function copyText(text) {
+      try {
+        await navigator.clipboard.writeText(text)
+        return true
+      } catch {
+        return false
+      }
+    }
+
     function SetupCard(props) {
       const setup = props.setup
+      const [busy, setBusy] = React.useState(false)
+      const [notice, setNotice] = React.useState(null)
       if (!setup) return null
+
       const serverOk = setup.token === true && setup.reachable === true
       const mcpState = setup.mcp === true ? 'ok' : setup.mcp === false ? 'todo' : 'unknown'
       const instructionsState = setup.instructions === true ? 'ok' : 'todo'
-      if (serverOk && mcpState === 'ok' && instructionsState === 'ok') return null
+      if (serverOk && mcpState === 'ok' && instructionsState === 'ok' && notice === null) return null
+
+      const write = () => {
+        setBusy(true)
+        setNotice(null)
+        props.onInstall()
+          .then((payload) => setNotice(payload && payload.ok
+            ? { ok: true, text: `已写入 ${payload.path}${payload.replaced ? '（替换原块）' : ''}` }
+            : { ok: false, text: String(payload && payload.error ? payload.error : '写入失败') }))
+          .catch((error) => setNotice({ ok: false, text: String(error?.message ?? error) }))
+          .finally(() => setBusy(false))
+      }
+
+      const mcpRow = setupRow(mcpState, 'MCP 工具（memory_*）',
+        mcpState === 'ok' ? '已检测到 mcp__ai-memory__*' : MCP_COMMAND)
+      if (mcpState !== 'ok') {
+        mcpRow.props.children[1].props.children.push(h('div', { className: 'aim-setup-actions', key: 'a' },
+          h('button', {
+            className: 'aim-btn mini',
+            type: 'button',
+            onClick: async (event) => {
+              const ok = await copyText(MCP_COMMAND)
+              event.target.textContent = ok ? '已复制' : '复制失败'
+            },
+          }, '复制命令')))
+      }
+
+      const instructionsRow = setupRow(instructionsState, '指令文件（可选）',
+        instructionsState === 'ok' ? '检测到 ai-memory 标记块' : '写入 ~/.agents/AGENTS.md 的 ai-memory 标记块')
+      instructionsRow.props.children[1].props.children.push(h('div', { className: 'aim-setup-actions', key: 'a' },
+        h('button', { className: 'aim-btn mini', type: 'button', onClick: write, disabled: busy },
+          busy ? '写入中…' : instructionsState === 'ok' ? '更新' : '写入')))
 
       return h('div', { className: 'aim-setup' },
         h('h4', null, '安装检查'),
@@ -152,14 +199,9 @@ window.__ModuleLoader__.load({
           serverOk
             ? (setup.reachable ? 'token 已读取 · 可连接' : 'token 已读取')
             : '安装并启动 ai-memory（默认 127.0.0.1:49374）'),
-        setupRow(mcpState, 'MCP 工具（memory_*）',
-          mcpState === 'ok'
-            ? '已检测到 mcp__ai-memory__*'
-            : '运行 ai-memory install-mcp --client dsh，把输出的 patch 合并进 profile'),
-        setupRow(instructionsState, '指令文件（可选）',
-          instructionsState === 'ok'
-            ? '检测到 ai-memory 标记块'
-            : '运行 ai-memory install-instructions；本插件已运行时注入提示，不装也能用'))
+        mcpRow,
+        instructionsRow,
+        notice ? h('div', { className: notice.ok ? 'aim-ok' : 'aim-error', style: { marginTop: '8px' } }, notice.text) : null)
     }
 
     function Browse(props) {
@@ -171,7 +213,7 @@ window.__ModuleLoader__.load({
       const empty = props.results === null ? '这个项目还没有页面。' : '没有匹配。试试勾上「全局」。'
 
       return h(React.Fragment, null,
-        h(SetupCard, { setup: props.setup }),
+        h(SetupCard, { setup: props.setup, onInstall: props.onInstall }),
         h('div', { className: 'aim-sec' },
           h('div', { className: 'aim-h2' }, props.headline),
           h('div', { className: 'aim-meta' }, props.meta),
@@ -240,7 +282,8 @@ window.__ModuleLoader__.load({
           field('maxPromptChars', form.maxPromptChars, (v) => set('maxPromptChars', v), 'number'),
           field('maxToolChars', form.maxToolChars, (v) => set('maxToolChars', v), 'number'),
           field('maxInflight', form.maxInflight, (v) => set('maxInflight', v), 'number'),
-          field('cooldownMs', form.cooldownMs, (v) => set('cooldownMs', v), 'number')),
+          field('cooldownMs', form.cooldownMs, (v) => set('cooldownMs', v), 'number'),
+          field('instructionsPath', form.instructionsPath, (v) => set('instructionsPath', v))),
         h('div', { className: 'aim-badges' },
           toggle('captureSession', form.captureSession, (v) => set('captureSession', v)),
           toggle('capturePrompt', form.capturePrompt, (v) => set('capturePrompt', v)),
@@ -314,6 +357,11 @@ window.__ModuleLoader__.load({
           .catch(() => setResults([]))
           .finally(() => setBusy(false))
       }
+
+      const install = () => api('install-instructions', {}).then((payload) => {
+        load(selected)
+        return payload
+      })
 
       const save = () => {
         // Only what actually changed is pinned; untouched fields keep following
@@ -407,6 +455,7 @@ window.__ModuleLoader__.load({
             projectCount: allProjects.length,
             connected,
             setup: payload && payload.setup,
+            onInstall: install,
           })
           : h(Settings, {
             payload,

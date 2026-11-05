@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -89,7 +89,7 @@ function fakeAiMemory() {
   }
 }
 
-function harness(baseUrl, { editor = null, mcp = true, instructions = false } = {}) {
+function harness(baseUrl, { editor = null, mcp = true, instructions = false, overrides = {} } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-ai-memory-route-'))
   writeFileSync(join(dir, 'auth-token'), 'tok\n')
   const workspace = mkdtempSync(join(tmpdir(), 'dsh-ai-memory-ws-'))
@@ -117,7 +117,7 @@ function harness(baseUrl, { editor = null, mcp = true, instructions = false } = 
       })
     },
   }
-  const dispose = apply(ctx, { serverUrl: baseUrl, dataDir: dir, timeoutMs: 1000 })
+  const dispose = apply(ctx, { serverUrl: baseUrl, dataDir: dir, timeoutMs: 1000, ...overrides })
   return { routes, dispose, ctx, workspace }
 }
 
@@ -128,6 +128,7 @@ test('the Host registers the panel routes', async () => {
   const h = harness(await server.url())
 
   assert.deepEqual([...h.routes.keys()].sort(), [
+    '/api/dsh-ai-memory/install-instructions',
     '/api/dsh-ai-memory/overview',
     '/api/dsh-ai-memory/search',
     '/api/dsh-ai-memory/settings',
@@ -279,4 +280,60 @@ test('setup reports a broken server as not ready', async () => {
   assert.equal(body.setup.ready, false)
 
   h.dispose()
+})
+
+test('the install route appends the marker block without touching the rest', async () => {
+  const server = fakeAiMemory()
+  const target = join(mkdtempSync(join(tmpdir(), 'dsh-ai-memory-rules-')), 'AGENTS.md')
+  writeFileSync(target, '# House rules\n\nbe nice\n')
+  const h = harness(await server.url(), { overrides: { instructionsPath: target } })
+  const route = h.routes.get('/api/dsh-ai-memory/install-instructions')
+
+  const first = await (await route.fetch(request({}))).json()
+  assert.equal(first.ok, true)
+  assert.equal(first.replaced, false)
+  assert.equal(first.path, target)
+
+  const text = readFileSync(target, 'utf8')
+  assert.match(text, /^# House rules/)
+  assert.match(text, /be nice/)
+  assert.equal(text.split('<!-- ai-memory:start -->').length, 2)
+
+  const second = await (await route.fetch(request({}))).json()
+  assert.equal(second.ok, true)
+  assert.equal(second.replaced, true)
+  const again = readFileSync(target, 'utf8')
+  assert.equal(again.split('<!-- ai-memory:start -->').length, 2, 'still one block')
+
+  h.dispose()
+  await server.close()
+})
+
+test('the install route refuses an unbalanced marker pair', async () => {
+  const server = fakeAiMemory()
+  const target = join(mkdtempSync(join(tmpdir(), 'dsh-ai-memory-rules-')), 'AGENTS.md')
+  writeFileSync(target, '<!-- ai-memory:start -->\nno end\n')
+  const h = harness(await server.url(), { overrides: { instructionsPath: target } })
+
+  const body = await (await h.routes.get('/api/dsh-ai-memory/install-instructions').fetch(request({}))).json()
+  assert.equal(body.ok, false)
+  assert.match(body.error, /unbalanced/)
+  assert.match(readFileSync(target, 'utf8'), /no end/, 'file untouched')
+
+  h.dispose()
+  await server.close()
+})
+
+test('the install check follows the configured rules file', async () => {
+  const server = fakeAiMemory()
+  const target = join(mkdtempSync(join(tmpdir(), 'dsh-ai-memory-rules-')), 'AGENTS.md')
+  writeFileSync(target, '<!-- ai-memory:start -->\nrules\n<!-- ai-memory:end -->\n')
+  const h = harness(await server.url(), { overrides: { instructionsPath: target } })
+
+  const body = await (await h.routes.get('/api/dsh-ai-memory/overview').fetch(request({}))).json()
+  assert.equal(body.setup.instructions, true)
+  assert.deepEqual(body.setup.instructionFiles, [target])
+
+  h.dispose()
+  await server.close()
 })

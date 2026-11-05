@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.0
+
+- The install check is actionable: the rules-file row has a **write** button that inserts or
+  replaces the canonical `ai-memory:start` block (fetched from the server, with a local fallback),
+  and the MCP row has a **copy command** button.
+- Writing is marker-scoped: existing content is preserved, an unbalanced marker pair is refused,
+  and the file is backed up before it is touched.
+- `instructionsPath` selects which rules file the check reads and the button writes; empty means
+  `~/.agents/AGENTS.md`, else the workspace `AGENTS.md`.
+
 ## 0.8.1
 
 - The panel now checks the install instead of assuming it: ai-memory reachability, whether the
