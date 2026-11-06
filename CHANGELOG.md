@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.3
+
+- A session ai-memory already pinned to another agent label is now captured under that label
+  instead of having every later event dropped as a session collision. The plugin reads the
+  pinned label back once per session (resolving the project from the working directory: nearest
+  `.ai-memory.toml`, else the git remote, else the directory name) and re-announces the session
+  under it; the install card says when that happened.
+
 ## 0.10.2
 
 - The scope note now matches how DSH reaches ai-memory. Its MCP client forwards no session id

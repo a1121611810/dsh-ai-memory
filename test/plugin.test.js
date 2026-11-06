@@ -7,7 +7,7 @@ import { test } from 'node:test'
 
 import { apply } from '../index.js'
 
-function harness({ token = 'tok', ensureCwd = '/repo', roots = null, version = '3.0.0' } = {}) {
+function harness({ token = 'tok', ensureCwd = '/repo', roots = null, version = '3.0.0', binding = null } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-ai-memory-'))
   if (token !== null) writeFileSync(join(dir, 'auth-token'), `${token}\n`)
   const received = []
@@ -24,6 +24,28 @@ function harness({ token = 'tok', ensureCwd = '/repo', roots = null, version = '
     request.setEncoding('utf8')
     request.on('data', (chunk) => { body += chunk })
     request.on('end', () => {
+      // The agent-binding probe is a tools/call; answer it without polluting
+      // the hook-event list the assertions count.
+      if (String(request.url) === '/mcp') {
+        if (binding === null) {
+          // No binding configured: behave like a server that cannot answer.
+          response.writeHead(503).end('no mcp')
+          return
+        }
+        const call = JSON.parse(body)
+        const session = {
+          session_id: call?.params?.arguments?.session_id ?? '',
+          agent_kind: binding.agent_kind,
+          observation_count: binding.observations ?? 2,
+          ended_at: binding.ended_at ?? null,
+        }
+        response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({
+          jsonrpc: '2.0',
+          id: call.id,
+          result: { content: [{ type: 'text', text: JSON.stringify({ session, observations: [] }) }] },
+        }))
+        return
+      }
       received.push({
         url: request.url,
         authorization: request.headers.authorization,
@@ -398,3 +420,35 @@ test('a server older than 3.0.0 is reported once and still captured', async () =
   assert.ok(h.logs.some(([level, message]) => level === 'warn' && message.includes('older than the supported 3.0.0')))
   await h.close()
 })
+
+test('a session the server pinned to another agent is captured under that label', async () => {
+  const h = harness({ version: '3.2.0', binding: { agent_kind: 'claude-code' } })
+  const baseUrl = await h.url()
+  apply(h.ctx, { serverUrl: baseUrl, dataDir: h.dir, timeoutMs: 500 })
+
+  h.handlers.get('session/created')({ id: 'session-pinned' })
+  await settle(h, 2)
+
+  assert.equal(h.received.length, 2)
+  assert.match(h.received[0].url, /event=session-start&agent=dsh$/)
+  // The probe found the pinned label, so the session is announced again under it.
+  assert.match(h.received[1].url, /event=session-start&agent=claude-code$/)
+  assert.equal(h.received[1].body.session_id, 'session-pinned')
+  assert.ok(h.logs.some(([level, text]) => level === 'warn' && text.includes('pinned to agent=claude-code')))
+  await h.close()
+})
+
+test('a session already pinned to the plugin label is announced once', async () => {
+  const h = harness({ version: '3.2.0', binding: { agent_kind: 'dsh' } })
+  const baseUrl = await h.url()
+  apply(h.ctx, { serverUrl: baseUrl, dataDir: h.dir, timeoutMs: 500 })
+
+  h.handlers.get('session/created')({ id: 'session-same' })
+  await settle(h, 1)
+  await flush()
+
+  assert.equal(h.received.length, 1)
+  assert.match(h.received[0].url, /agent=dsh$/)
+  await h.close()
+})
+

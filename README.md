@@ -119,7 +119,7 @@ Set these on the plugin row (`cordis.patch.yml` or the row's configuration page)
 |---|---|---|
 | `serverUrl` | `http://127.0.0.1:49374` | ai-memory base URL. Non-loopback hosts are refused unless `allowRemote` is set, and must then use `https`. |
 | `dataDir` | platform default | Where to read `auth-token`. Empty resolves `$AI_MEMORY_DATA_DIR`, then the platform data directory. |
-| `agent` | `auto` | Agent label ai-memory records. `auto` picks `dsh` on ai-memory 3.2.0+ and `claude-code` on 3.0.0-3.1.x; set any ai-memory agent kind to override. ai-memory binds a label to a session id on first capture, so a session started under another label cannot switch: the plugin resolves one label per run, and a session captured before this change stays `claude-code`. |
+| `agent` | `auto` | Agent label ai-memory records. `auto` picks `dsh` on ai-memory 3.2.0+ and `claude-code` on 3.0.0-3.1.x; set any ai-memory agent kind to override. ai-memory pins a label to a session id on first capture, so when a session is already pinned to another kind the plugin keeps the pinned one for that session: switching labels would otherwise drop every event as a collision. |
 | `allowRemote` | `false` | Permit a non-loopback server. |
 | `timeoutMs` | `3000` | Per-request timeout. |
 | `captureSession` | `true` | Forward session start and end. |

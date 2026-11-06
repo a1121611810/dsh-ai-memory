@@ -15,9 +15,10 @@ import { join } from 'node:path'
 import z from '@deepseek-ai/schemastery'
 
 import { buildHookPayload, clipJson, clipText, postHook } from './lib/hook.js'
-import { buildOverview, health, search, serverInfo } from './lib/mcp.js'
+import { buildOverview, health, search, serverInfo, sessionBinding } from './lib/mcp.js'
 import { normalizeBaseUrl, readToken, resolveDataDir } from './lib/paths.js'
 import { createSender } from './lib/queue.js'
+import { resolveScope } from './lib/scope.js'
 import { redactDeep, redactSecrets } from './lib/redact.js'
 
 export const name = 'dsh-ai-memory'
@@ -162,6 +163,11 @@ export function apply(ctx, config) {
   // carries the agent. A session is closed at most once.
   const openSessions = new Map()
   const closedSessions = new Set()
+  /** Session id -> the agent label ai-memory already pinned, once discovered. */
+  const sessionAgents = new Map()
+  /** Session id -> the label switch the server forced, for the panel. */
+  const captureNotes = new Map()
+  const scopeByCwd = new Map()
 
   /**
    * ai-memory has no `dsh` agent kind before 3.2.0, and it binds a session to
@@ -232,6 +238,43 @@ export function apply(ctx, config) {
     return typeof cwd === 'string' && cwd !== '' ? cwd : null
   }
 
+  /** The label this session is captured under: the pinned one when known. */
+  const agentFor = async (sessionId) => sessionAgents.get(sessionId) ?? await resolveAgent()
+
+  const scopeForCwd = (cwd) => {
+    if (scopeByCwd.has(cwd)) return scopeByCwd.get(cwd)
+    const scope = resolveScope(cwd)
+    scopeByCwd.set(cwd, scope)
+    return scope
+  }
+
+  /**
+   * ai-memory pins a session's agent label on first capture and drops every
+   * later event that disagrees, so an agent setting change silently loses a
+   * live session. Read the pinned label back once and adopt it: the rest of
+   * this session is then captured under the label the server already knows.
+   */
+  const adoptBinding = async (sessionId, cwd) => {
+    if (settings.captureSession !== true) return
+    const sent = await agentFor(sessionId)
+    const scope = scopeForCwd(cwd)
+    if (scope === null) return
+    const binding = await sessionBinding({
+      baseUrl,
+      token,
+      scope,
+      sessionId,
+      timeoutMs: Math.min(settings.timeoutMs, 2000),
+    })
+    if (binding === null || binding.agent === sent) return
+    sessionAgents.set(sessionId, binding.agent)
+    captureNotes.set(sessionId, { sent, bound: binding.agent, ended: binding.ended })
+    while (captureNotes.size > 5) captureNotes.delete(captureNotes.keys().next().value)
+    log('warn', 'session ' + sessionId + ' is pinned to agent=' + binding.agent + '; capturing under that label instead of ' + sent)
+    // Re-announce so the server sees this session's start under its own label.
+    send('session-start', sessionId, cwd)
+  }
+
   const send = (event, sessionId, cwd, fields = {}) => {
     if (settings.captureSession !== true) return
     let payload
@@ -247,7 +290,7 @@ export function apply(ctx, config) {
         token,
         event,
         payload,
-        agent: await resolveAgent(),
+        agent: await agentFor(sessionId),
         timeoutMs: settings.timeoutMs,
       })
       if (!result.ok && !warnedFailure) {
@@ -263,6 +306,7 @@ export function apply(ctx, config) {
     if (cwd === null || closedSessions.has(sessionId) || openSessions.has(sessionId)) return
     openSessions.set(sessionId, cwd)
     send('session-start', sessionId, cwd)
+    void adoptBinding(sessionId, cwd)
   }
 
   const opened = (session) => open(session?.id, cwdOf(session))
@@ -512,12 +556,16 @@ export function apply(ctx, config) {
       mcp = null
     }
 
+    const notes = [...captureNotes.values()]
     return {
       token: token !== null,
       reachable,
       mcp,
       instructions: instructionFiles.some(fileHasMarker),
       instructionFiles,
+      // A session the server had already pinned to another label: the plugin
+      // adopted it, but the panel should say so instead of staying silent.
+      capture: notes.length === 0 ? null : notes[notes.length - 1],
       ready: token !== null && reachable,
     }
   }

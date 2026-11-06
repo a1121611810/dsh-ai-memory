@@ -72,6 +72,7 @@ window.__ModuleLoader__.load({
       .aim-setup-row.ok .aim-setup-mark { color: var(--dsw-alias-state-success-primary); }
       .aim-setup-row.todo .aim-setup-mark { color: var(--dsw-alias-state-error-primary); }
       .aim-setup-row.unknown .aim-setup-mark { color: var(--dsw-alias-label-secondary); }
+    .aim-setup-row.warn .aim-setup-mark { color: var(--dsw-alias-state-warn-primary); }
       .aim-setup-hint { color: var(--dsw-alias-label-secondary); font-size: 11px; margin-top: 2px; }
       .aim-setup-actions { display: flex; gap: 6px; margin-top: 6px; }
       .aim-btn.mini { padding: 2px 9px; font-size: 11px; }
@@ -135,7 +136,7 @@ window.__ModuleLoader__.load({
       label)
 
     const setupRow = (state, title, hint) => h('div', { className: `aim-setup-row ${state}`, key: title },
-      h('span', { className: 'aim-setup-mark' }, state === 'ok' ? '✓' : state === 'todo' ? '✗' : '?'),
+      h('span', { className: 'aim-setup-mark' }, state === 'ok' ? '✓' : state === 'todo' ? '✗' : state === 'warn' ? '!' : '?'),
       h('div', null,
         h('div', null, title),
         hint ? h('div', { className: 'aim-setup-hint' }, hint) : null))
@@ -160,7 +161,8 @@ window.__ModuleLoader__.load({
       const serverOk = setup.token === true && setup.reachable === true
       const mcpState = setup.mcp === true ? 'ok' : setup.mcp === false ? 'todo' : 'unknown'
       const instructionsState = setup.instructions === true ? 'ok' : 'todo'
-      if (serverOk && mcpState === 'ok' && instructionsState === 'ok' && notice === null) return null
+      const capture = setup.capture
+      if (serverOk && mcpState === 'ok' && instructionsState === 'ok' && notice === null && !capture) return null
 
       const write = () => {
         setBusy(true)
@@ -187,6 +189,11 @@ window.__ModuleLoader__.load({
           }, '复制命令')))
       }
 
+      const captureRow = capture
+        ? setupRow('warn', '会话采集标签',
+          `服务器已把该会话记为 ${capture.bound}，插件已改用这个标签（原 ${capture.sent}）${capture.ended ? '。该会话已结束，新开会话即可按新标签采集' : ''}`)
+        : null
+
       const instructionsRow = setupRow(instructionsState, '指令文件（可选）',
         instructionsState === 'ok' ? '检测到 ai-memory 标记块' : '写入 ~/.agents/AGENTS.md 的 ai-memory 标记块')
       instructionsRow.props.children[1].props.children.push(h('div', { className: 'aim-setup-actions', key: 'a' },
@@ -200,6 +207,7 @@ window.__ModuleLoader__.load({
             ? (setup.reachable ? 'token 已读取 · 可连接' : 'token 已读取')
             : '安装并启动 ai-memory（默认 127.0.0.1:49374）'),
         mcpRow,
+        captureRow,
         instructionsRow,
         notice ? h('div', { className: notice.ok ? 'aim-ok' : 'aim-error', style: { marginTop: '8px' } }, notice.text) : null)
     }
