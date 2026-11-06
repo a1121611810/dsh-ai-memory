@@ -268,7 +268,7 @@ export function apply(ctx, config) {
     })
     if (binding === null || binding.agent === sent) return
     sessionAgents.set(sessionId, binding.agent)
-    captureNotes.set(sessionId, { sent, bound: binding.agent, ended: binding.ended })
+    captureNotes.set(sessionId, { sent, bound: binding.agent })
     while (captureNotes.size > 5) captureNotes.delete(captureNotes.keys().next().value)
     log('warn', 'session ' + sessionId + ' is pinned to agent=' + binding.agent + '; capturing under that label instead of ' + sent)
     // Re-announce so the server sees this session's start under its own label.

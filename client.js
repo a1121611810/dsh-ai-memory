@@ -191,7 +191,7 @@ window.__ModuleLoader__.load({
 
       const captureRow = capture
         ? setupRow('warn', '会话采集标签',
-          `服务器已把该会话记为 ${capture.bound}，插件已改用这个标签（原 ${capture.sent}）${capture.ended ? '。该会话已结束，新开会话即可按新标签采集' : ''}`)
+          `服务器已把该会话记为 ${capture.bound}，插件已改用这个标签采集（原 ${capture.sent}）`)
         : null
 
       const instructionsRow = setupRow(instructionsState, '指令文件（可选）',

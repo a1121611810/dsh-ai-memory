@@ -1,6 +1,6 @@
 {
   "name": "dsh-ai-memory",
-  "version": "0.10.3",
+  "version": "0.10.4",
   "description": "Capture DeepSeek Harness sessions into ai-memory with real session identity.",
   "type": "module",
   "main": "index.js",

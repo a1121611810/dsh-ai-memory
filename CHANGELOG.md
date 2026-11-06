@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.4
+
+- The capture row says only which label the plugin adopted. It no longer tells the user to open
+  a new session: ai-memory keeps appending observations to a session it already marked ended, so
+  the old wording was wrong for the case it described.
+
 ## 0.10.3
 
 - A session ai-memory already pinned to another agent label is now captured under that label
