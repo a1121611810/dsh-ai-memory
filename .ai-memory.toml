@@ -1,0 +1,6 @@
+# Pin this checkout to the project that already holds its sessions.
+# Without it ai-memory derives the name from the git origin
+# (a1121611810-dsh-ai-memory), which was never created, so MCP scope lookups
+# fail and hooks and MCP disagree about the project.
+workspace = "default"
+project = "dsh-ai-memory"
