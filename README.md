@@ -33,7 +33,9 @@ If the server is not running the panel says so and shows the setup steps; nothin
 ## Requirements
 
 - DeepSeek Harness 0.2.2-rc.1 or newer.
-- ai-memory 3.x reachable on loopback (default `http://127.0.0.1:49374`).
+- ai-memory 3.0.0 or newer, reachable on loopback (default `http://127.0.0.1:49374`).
+  Sessions are recorded as `dsh` on ai-memory 3.2.0+, where that agent kind was added,
+  and as `claude-code` below it. The label is detected once per plugin run.
 - The ai-memory MCP server, if you want the `memory_*` tools as well. This plugin only syncs sessions.
 
 ## Install
@@ -69,8 +71,9 @@ The plugin adds an **ai-memory** entry to the left rail: a memory browser with t
 
 - Left: every project that holds pages, newest first; the session's own project is pinned on top.
 - Right: counters, 7-day activity, open handoffs, messages, rules, and the project's agent
-  breakdown (which harness wrote how many sessions), then its most recently updated pages —
-  each tagged with its kind and the agent recorded in its frontmatter.
+  breakdown (which harness wrote how many sessions), then its most recently updated pages.
+  Session summaries are tagged with the agent that wrote them (ai-memory records no agent on
+  notes, decisions or gotchas); every visible session summary gets its tag.
 - Search: full-text inside the selected project, or across every project with **全局**. Every hit
   shows the project it came from.
 
@@ -116,7 +119,7 @@ Set these on the plugin row (`cordis.patch.yml` or the row's configuration page)
 |---|---|---|
 | `serverUrl` | `http://127.0.0.1:49374` | ai-memory base URL. Non-loopback hosts are refused unless `allowRemote` is set, and must then use `https`. |
 | `dataDir` | platform default | Where to read `auth-token`. Empty resolves `$AI_MEMORY_DATA_DIR`, then the platform data directory. |
-| `agent` | `claude-code` | Agent label ai-memory records. ai-memory binds the agent kind to a session id on first capture, so changing this after sessions exist makes their events drop as session collisions. Leave it alone. |
+| `agent` | `auto` | Agent label ai-memory records. `auto` picks `dsh` on ai-memory 3.2.0+ and `claude-code` on 3.0.0-3.1.x; set any ai-memory agent kind to override. ai-memory binds a label to a session id on first capture, so a session started under another label cannot switch: the plugin resolves one label per run, and a session captured before this change stays `claude-code`. |
 | `allowRemote` | `false` | Permit a non-loopback server. |
 | `timeoutMs` | `3000` | Per-request timeout. |
 | `captureSession` | `true` | Forward session start and end. |

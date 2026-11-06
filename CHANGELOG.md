@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.10.1
+
+- The panel labels every visible session page, not just the newest eight. ai-memory 3.2.0+
+  maps `sessions/<id>.md` rows from the briefing's `recent_sessions` in the same round trip;
+  3.0.0-3.1.x, which has no `recent_sessions`, falls back to one frontmatter read per visible
+  page. Kimi Code and other rows that used to show no agent now carry their label.
+
+## 0.10.0
+
+- Sessions are recorded as `dsh` again, this time only where ai-memory supports it: 3.2.0
+  introduced the `dsh` agent kind, so the plugin probes the server version once per run and
+  keeps `claude-code` on 3.0.0-3.1.x. The 3.0.0 floor is unchanged.
+- `agent` now defaults to `auto` (server version decides); an explicit value still wins and
+  skips the probe.
+- A version older than 3.0.0 is logged as unsupported rather than silently captured.
+- Known one-time gap: ai-memory pins each session to the label it first arrived under, and
+  collisions are dropped. Sessions captured before this upgrade stay `claude-code`; set
+  `agent: claude-code` if you need to capture one of them again.
+
 ## 0.9.1
 
 - The pinned row is labelled "共享槽位" instead of "当前会话": it shows the project unscoped MCP

@@ -7,13 +7,17 @@ import { test } from 'node:test'
 
 import { apply } from '../index.js'
 
-function harness({ token = 'tok', ensureCwd = '/repo', roots = null } = {}) {
+function harness({ token = 'tok', ensureCwd = '/repo', roots = null, version = '3.0.0' } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-ai-memory-'))
   if (token !== null) writeFileSync(join(dir, 'auth-token'), `${token}\n`)
   const received = []
+  const state = { version, probes: 0 }
+  const logs = []
   const server = createServer((request, response) => {
     if (request.method !== 'POST') {
-      response.writeHead(200, { 'content-type': 'application/json' }).end('{"status":"ok"}')
+      if (String(request.url).startsWith('/admin/status')) state.probes += 1
+      const payload = String(request.url).startsWith('/admin/status') ? { version: state.version } : { status: 'ok' }
+      response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(payload))
       return
     }
     let body = ''
@@ -41,7 +45,11 @@ function harness({ token = 'tok', ensureCwd = '/repo', roots = null } = {}) {
       handlers.set(event, handler)
       return () => handlers.delete(event)
     },
-    logger: { info() {}, warn() {}, debug() {} },
+    logger: {
+      info: (message) => logs.push(['info', message]),
+      warn: (message) => logs.push(['warn', message]),
+      debug: (message) => logs.push(['debug', message]),
+    },
   }
   const ready = new Promise((resolve) => {
     server.listen(0, '127.0.0.1', () => {
@@ -58,10 +66,19 @@ function harness({ token = 'tok', ensureCwd = '/repo', roots = null } = {}) {
     server.closeAllConnections?.()
     server.close(resolve)
   })
-  return { dir, handlers, ctx, url, close, received }
+  return { dir, handlers, ctx, url, close, received, state, logs }
 }
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 50))
+
+// Capture is async (version probe + POST), so wait for the events instead of
+// guessing a delay: a loaded machine made the fixed sleeps flaky.
+const settle = async (h, count) => {
+  for (let attempt = 0; attempt < 100 && h.received.length < count; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  assert.ok(h.received.length >= count, `expected ${count} events, got ${h.received.length}`)
+}
 
 test('apply forwards session start and end with the real session identity', async () => {
   const h = harness()
@@ -69,9 +86,9 @@ test('apply forwards session start and end with the real session identity', asyn
   const dispose = apply(h.ctx, { serverUrl: baseUrl, dataDir: h.dir, timeoutMs: 500 })
 
   h.handlers.get('session/created')({ id: 'session-1' })
-  await flush()
+  await settle(h, 1)
   h.handlers.get('session/disposed')({ id: 'session-1' })
-  await flush()
+  await settle(h, 2)
 
   assert.equal(h.received.length, 2)
   assert.match(h.received[0].url, /\/hook\?event=session-start&agent=claude-code$/)
@@ -105,7 +122,7 @@ test('agent disposal closes a session exactly once, even after session disposal'
   await flush()
   h.handlers.get('session/disposed')({ id: 'session-2' })
   h.handlers.get('agent/disposed')({ agent: { id: 'session-2' } })
-  await flush()
+  await settle(h, 2)
 
   const ends = h.received.filter((entry) => entry.url.includes('session-end'))
   assert.equal(ends.length, 1)
@@ -169,7 +186,7 @@ test('capturePrompt forwards the prompt text once per message', async () => {
   const claimed = { agent: { id: 'session-x' }, message: { id: 'm1', content: [{ type: 'text', text: 'hello there' }] } }
   h.handlers.get('agent/inbox/claimed')(claimed)
   h.handlers.get('agent/inbox/claimed')(claimed)
-  await flush()
+  await settle(h, 2)
 
   const prompts = h.received.filter((entry) => entry.url.includes('user-prompt'))
   assert.equal(prompts.length, 1)
@@ -187,7 +204,7 @@ test('tool results are forwarded with a clipped body', async () => {
     { agent: { id: 'session-x' }, name: 'bash', arguments: { command: 'echo hello' } },
     { isError: false, content: [{ type: 'text', text: 'x'.repeat(60) }] },
   )
-  await flush()
+  await settle(h, 2)
 
   const tool = h.received.find((entry) => entry.url.includes('post-tool-use'))
   assert.ok(tool)
@@ -204,7 +221,7 @@ test('turn stopping is forwarded as a stop event', async () => {
   apply(h.ctx, { serverUrl: baseUrl, dataDir: h.dir, timeoutMs: 500 })
   openSession(h)
   h.handlers.get('agent/turn-stopping')({ agent: { id: 'session-x' }, turn: 1 })
-  await flush()
+  await settle(h, 2)
 
   const stop = h.received.find((entry) => entry.url.includes('event=stop'))
   assert.ok(stop)
@@ -259,7 +276,7 @@ test('a resumed agent opens the session when creation never announced it', async
   apply(h.ctx, { serverUrl: baseUrl, dataDir: h.dir, timeoutMs: 500 })
 
   h.handlers.get('agent/created')({ agent: { id: 'session-resume' }, source: 'resume' })
-  await flush()
+  await settle(h, 1)
 
   const starts = h.received.filter((entry) => entry.url.includes('session-start'))
   assert.equal(starts.length, 1)
@@ -286,11 +303,12 @@ test('any agent activity opens a session that the creation seams missed', async 
   apply(h.ctx, { serverUrl: baseUrl, dataDir: h.dir, timeoutMs: 500 })
 
   h.handlers.get('agent/turn-stopping')({ agent: { id: 'session-late' }, turn: 1 })
-  await flush()
+  await settle(h, 2)
 
+  // Both are enqueued at once, so arrival order is the transport's, not ours.
   assert.equal(h.received.length, 2)
-  assert.match(h.received[0].url, /event=session-start/)
-  assert.match(h.received[1].url, /event=stop/)
+  assert.equal(h.received.filter((entry) => entry.url.includes('event=session-start')).length, 1)
+  assert.equal(h.received.filter((entry) => entry.url.includes('event=stop')).length, 1)
   await h.close()
 })
 
@@ -301,10 +319,77 @@ test('a durability flush registers a session that no creation seam reached', asy
 
   h.handlers.get('session/flush')({ id: 'session-flushed' })
   h.handlers.get('session/flush')({ id: 'session-flushed' })
-  await flush()
+  await settle(h, 1)
 
   const starts = h.received.filter((entry) => entry.url.includes('session-start'))
   assert.equal(starts.length, 1)
   assert.equal(starts[0].body.cwd, '/repo')
+  await h.close()
+})
+
+test('ai-memory 3.2.0 and newer record the dsh agent label', async () => {
+  const h = harness({ version: '3.4.2' })
+  const baseUrl = await h.url()
+  apply(h.ctx, { serverUrl: baseUrl, dataDir: h.dir, timeoutMs: 500 })
+
+  h.handlers.get('session/created')({ id: 'session-dsh' })
+  await settle(h, 1)
+
+  assert.equal(h.state.probes, 1)
+  assert.match(h.received[0].url, /event=session-start&agent=dsh$/)
+  await h.close()
+})
+
+test('ai-memory 3.0.0 keeps the claude-code label', async () => {
+  const h = harness({ version: '3.0.0' })
+  const baseUrl = await h.url()
+  apply(h.ctx, { serverUrl: baseUrl, dataDir: h.dir, timeoutMs: 500 })
+
+  h.handlers.get('session/created')({ id: 'session-old' })
+  await settle(h, 1)
+
+  assert.match(h.received[0].url, /event=session-start&agent=claude-code$/)
+  await h.close()
+})
+
+test('an explicit agent skips version detection', async () => {
+  const h = harness({ version: '3.4.2' })
+  const baseUrl = await h.url()
+  apply(h.ctx, { serverUrl: baseUrl, dataDir: h.dir, timeoutMs: 500, agent: 'pi' })
+
+  h.handlers.get('session/created')({ id: 'session-fixed' })
+  await settle(h, 1)
+
+  assert.equal(h.state.probes, 0)
+  assert.match(h.received[0].url, /event=session-start&agent=pi$/)
+  await h.close()
+})
+
+test('a mid-session version change does not relabel the session', async () => {
+  const h = harness({ version: '3.4.2' })
+  const baseUrl = await h.url()
+  apply(h.ctx, { serverUrl: baseUrl, dataDir: h.dir, timeoutMs: 500 })
+
+  h.handlers.get('session/created')({ id: 'session-pinned' })
+  await settle(h, 1)
+  h.state.version = '3.0.0'
+  h.handlers.get('session/disposed')({ id: 'session-pinned' })
+  await settle(h, 2)
+
+  assert.equal(h.state.probes, 1)
+  for (const entry of h.received) assert.match(entry.url, /agent=dsh$/)
+  await h.close()
+})
+
+test('a server older than 3.0.0 is reported once and still captured', async () => {
+  const h = harness({ version: '2.9.0' })
+  const baseUrl = await h.url()
+  apply(h.ctx, { serverUrl: baseUrl, dataDir: h.dir, timeoutMs: 500 })
+
+  h.handlers.get('session/created')({ id: 'session-ancient' })
+  await settle(h, 1)
+
+  assert.match(h.received[0].url, /agent=claude-code$/)
+  assert.ok(h.logs.some(([level, message]) => level === 'warn' && message.includes('older than the supported 3.0.0')))
   await h.close()
 })

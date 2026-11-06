@@ -262,7 +262,7 @@ window.__ModuleLoader__.load({
 
       const serverCard = h('div', { className: 'aim-sec' },
         h('div', { className: 'aim-h2' }, 'ai-memory 服务'),
-        h('div', { className: 'aim-meta' }, '只读。改服务端配置需要编辑 config.toml 并重启服务。'),
+        h('div', { className: 'aim-meta' }, '只读。改服务端配置需要编辑 config.toml 并重启服务。兼容 ai-memory ≥3.0.0（dsh 标签需 3.2.0+）。'),
         h('div', { className: 'aim-grid' },
           cell(facts.version ?? '—', 'version'),
           cell(providers.llm ?? '—', 'llm'),
@@ -275,6 +275,8 @@ window.__ModuleLoader__.load({
         h('div', { className: 'aim-h2' }, '插件设置'),
         h('div', { className: 'aim-meta' },
           s.editable ? '保存后插件会重启一次以应用新配置。' : '当前 profile 不允许写配置，只能查看。'),
+        h('div', { className: 'aim-meta' },
+          'agent=auto：ai-memory ≥ 3.2.0 记为 dsh，3.0–3.1 记为 claude-code。'),
         h('div', { className: 'aim-form' },
           field('serverUrl', form.serverUrl, (v) => set('serverUrl', v)),
           field('agent', form.agent, (v) => set('agent', v)),

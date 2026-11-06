@@ -29,8 +29,9 @@ const PROJECTS = [
   { workspace_name: 'default', project_name: 'empty', page_count: 0, last_updated: '2026-11-05T15:00:00Z' },
 ]
 
-function fakeAiMemory() {
+function fakeAiMemory({ briefing = BRIEFING } = {}) {
   const calls = []
+  const readPageCalls = []
   const server = createServer((request, response) => {
     const url = new URL(request.url, 'http://127.0.0.1')
     const json = (payload) => response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(payload))
@@ -55,6 +56,7 @@ function fakeAiMemory() {
       return json({ by_agent: [{ agent: 'claude-code', sessions: 18 }, { agent: 'other', sessions: 3 }] })
     }
     if (request.method === 'GET' && url.pathname === '/admin/read-page') {
+      readPageCalls.push(url.searchParams.get('path'))
       return json({ path: url.searchParams.get('path'), frontmatter: { agent: 'claude-code' } })
     }
     if (request.method === 'POST' && url.pathname === '/mcp') {
@@ -67,7 +69,7 @@ function fakeAiMemory() {
         const value = call.params.name === 'memory_status'
           ? STATUS
           : call.params.name === 'memory_briefing'
-            ? BRIEFING
+            ? briefing
             : QUERY
         json({ jsonrpc: '2.0', id: call.id, result: { content: [{ type: 'text', text: JSON.stringify(value) }] } })
       })
@@ -80,6 +82,7 @@ function fakeAiMemory() {
   })
   return {
     calls,
+    readPageCalls,
     ready,
     close: () => new Promise((resolve) => { server.closeAllConnections?.(); server.close(resolve) }),
     url: async () => {
@@ -347,6 +350,51 @@ test('without a connection service no route is registered at all', async () => {
   const h = harness(await server.url(), { connection: false })
 
   assert.equal(h.routes.size, 0, 'fail closed: no endpoint to reach unauthenticated')
+
+  h.dispose()
+  await server.close()
+})
+
+const sessionPages = (count) => Array.from({ length: count }, (_, index) => ({
+  path: `sessions/10000000-0000-4000-8000-${String(index).padStart(12, '0')}.md`,
+  title: `Session ${index}`,
+  kind: 'session',
+}))
+const sessionIdOf = (page) => page.path.slice('sessions/'.length, -'.md'.length)
+
+test('every visible session page gets its agent, not just the first eight', async () => {
+  const pages = sessionPages(12)
+  const recentSessions = pages.slice(0, 10).map((page, index) => ({
+    session_id: sessionIdOf(page),
+    agent_kind: index === 9 ? 'kimi-code' : 'pi',
+  }))
+  const server = fakeAiMemory({ briefing: { ...BRIEFING, recent_pages: pages, recent_sessions: recentSessions } })
+  const h = harness(await server.url())
+
+  const body = await (await h.routes.get('/api/dsh-ai-memory/overview').fetch(request({}))).json()
+
+  assert.equal(Object.keys(body.pageAgents).length, 12)
+  assert.equal(body.pageAgents[pages[7].path], 'pi')
+  assert.equal(body.pageAgents[pages[9].path], 'kimi-code')
+  // Only the two sessions missing from recent_sessions need a frontmatter read.
+  assert.deepEqual(server.readPageCalls.sort(), [pages[10].path, pages[11].path].sort())
+
+  const briefCall = server.calls.find((call) => call?.params?.name === 'memory_briefing')
+  assert.equal(briefCall.params.arguments.recent_sessions_limit, 50)
+
+  h.dispose()
+  await server.close()
+})
+
+test('ai-memory 3.0.0 without recent_sessions still labels every visible page', async () => {
+  const pages = sessionPages(12)
+  const server = fakeAiMemory({ briefing: { ...BRIEFING, recent_pages: pages } })
+  const h = harness(await server.url())
+
+  const body = await (await h.routes.get('/api/dsh-ai-memory/overview').fetch(request({}))).json()
+
+  assert.equal(server.readPageCalls.length, 12)
+  assert.equal(body.pageAgents[pages[11].path], 'claude-code')
 
   h.dispose()
   await server.close()

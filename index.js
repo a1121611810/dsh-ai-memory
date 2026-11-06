@@ -15,7 +15,7 @@ import { join } from 'node:path'
 import z from '@deepseek-ai/schemastery'
 
 import { buildHookPayload, clipJson, clipText, postHook } from './lib/hook.js'
-import { buildOverview, health, search } from './lib/mcp.js'
+import { buildOverview, health, search, serverInfo } from './lib/mcp.js'
 import { normalizeBaseUrl, readToken, resolveDataDir } from './lib/paths.js'
 import { createSender } from './lib/queue.js'
 import { redactDeep, redactSecrets } from './lib/redact.js'
@@ -25,7 +25,7 @@ export const name = 'dsh-ai-memory'
 export const DEFAULTS = Object.freeze({
   serverUrl: 'http://127.0.0.1:49374',
   dataDir: '',
-  agent: 'claude-code',
+  agent: 'auto',
   allowRemote: false,
   timeoutMs: 3000,
   captureSession: true,
@@ -46,7 +46,7 @@ export const Config = z.object({
   dataDir: z.string().default(DEFAULTS.dataDir)
     .description('ai-memory data directory; empty means the platform default.'),
   agent: z.string().default(DEFAULTS.agent)
-    .description('Agent label ai-memory records for these events.'),
+    .description("Agent label ai-memory records. 'auto' picks dsh on ai-memory 3.2.0 or newer and claude-code below it."),
   allowRemote: z.boolean().default(DEFAULTS.allowRemote)
     .description('Permit a non-loopback serverUrl. It must then use https.'),
   timeoutMs: z.number().min(100).max(60000).default(DEFAULTS.timeoutMs)
@@ -159,6 +159,61 @@ export function apply(ctx, config) {
   const openSessions = new Map()
   const closedSessions = new Set()
 
+  /**
+   * ai-memory has no `dsh` agent kind before 3.2.0, and it binds a session to
+   * the label it first arrived under: any later event with another label is
+   * dropped as a session collision. Resolve one label per process instead of
+   * per event, and keep claude-code on older servers so 3.0.0 keeps working.
+   */
+  const DSH_AGENT = 'dsh'
+  const FALLBACK_AGENT = 'claude-code'
+  const DSH_AGENT_FLOOR = [3, 2, 0]
+  const SUPPORTED_FLOOR = [3, 0, 0]
+
+  const versionAtLeast = (version, floor) => {
+    const match = /^(\d+)\.(\d+)\.(\d+)/.exec(String(version ?? ''))
+    if (match === null) return false
+    const parts = match.slice(1, 4).map(Number)
+    for (let index = 0; index < floor.length; index += 1) {
+      if (parts[index] !== floor[index]) return parts[index] > floor[index]
+    }
+    return true
+  }
+
+  /** An explicit `agent` wins; `auto` and empty ask the server. */
+  const configuredAgent = () => {
+    const value = typeof settings.agent === 'string' ? settings.agent.trim() : ''
+    return value === '' || value.toLowerCase() === 'auto' ? null : value
+  }
+
+  let resolvedAgent = null
+  let agentProbe = null
+  const resolveAgent = () => {
+    const override = configuredAgent()
+    if (override !== null) return Promise.resolve(override)
+    if (resolvedAgent !== null) return Promise.resolve(resolvedAgent)
+    if (agentProbe === null) {
+      agentProbe = serverInfo({ baseUrl, token, timeoutMs: Math.min(settings.timeoutMs, 2000) })
+        .catch(() => null)
+        .then((info) => {
+          const version = typeof info?.version === 'string' ? info.version : null
+          if (version === null) {
+            // Unreachable or unreadable: retry on the next session rather than
+            // pinning claude-code for the rest of the process.
+            agentProbe = null
+            return FALLBACK_AGENT
+          }
+          if (!versionAtLeast(version, SUPPORTED_FLOOR)) {
+            log('warn', `ai-memory ${version} is older than the supported 3.0.0; capture may fail`)
+          }
+          resolvedAgent = versionAtLeast(version, DSH_AGENT_FLOOR) ? DSH_AGENT : FALLBACK_AGENT
+          log('debug', `recording sessions as agent=${resolvedAgent} (ai-memory ${version})`)
+          return resolvedAgent
+        })
+    }
+    return agentProbe
+  }
+
   const cwdOf = (session) => {
     try {
       const workingDirectory = ctx.get('workingDirectory')
@@ -188,7 +243,7 @@ export function apply(ctx, config) {
         token,
         event,
         payload,
-        agent: settings.agent,
+        agent: await resolveAgent(),
         timeoutMs: settings.timeoutMs,
       })
       if (!result.ok && !warnedFailure) {
