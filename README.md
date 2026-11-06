@@ -134,12 +134,17 @@ Set these on the plugin row (`cordis.patch.yml` or the row's configuration page)
 
 ## How memory is scoped
 
-ai-memory is one store shared by every agent on the machine, but pages are filed **per project**,
-and a project is resolved from the working directory (git remote). Two consequences:
+ai-memory is one store shared by every agent on the machine, but pages are filed **per project**.
 
-- Agents that run in the same repository read each other's memory automatically.
-- `memory_query` searches only the current project. To read another project, or work another
-  agent did elsewhere, pass `global: true` or explicit `workspace`/`project` scopes.
+DSH's MCP client is stateless: it forwards no session id and runs in the Host working directory,
+so an unscoped `memory_*` call resolves through ai-memory's active-project pointer — often the
+shared slot, i.e. whatever project another agent touched last — instead of this session's repository.
+
+- Pass `workspace` and `project` together on every project-scoped call. Take the exact names from
+  the nearest `.ai-memory.toml`; otherwise derive `<owner>-<repo>` from the git origin, else the
+  directory name.
+- `memory_query` with `global: true` searches every project at once.
+- Agents that run in the same repository still read each other's memory automatically.
 
 This plugin tells the model that at every session (`announceScope`), so a thin result reads as
 "not in this project" instead of "not remembered".

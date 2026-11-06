@@ -77,15 +77,19 @@ const isObject = (value) => typeof value === 'object' && value !== null && !Arra
 
 /**
  * One short, static note: memory is shared on this machine but filed per
- * project, so a thin result is a scoping signal, not an absence of knowledge.
+ * project, and DSH's stateless MCP client gets no coordinates from the server,
+ * so the model has to pass the scope. A thin result is a scoping signal, not an
+ * absence of knowledge.
  */
 const SCOPE_NOTE = [
   '## ai-memory scope',
   '',
-  'ai-memory is shared by every agent on this machine, but pages are filed per project (one project per repository, resolved from the working directory).',
+  'ai-memory is shared by every agent on this machine, but pages are filed per project.',
   '',
-  '- `memory_query` without arguments searches only the current project.',
-  '- When the question may span other projects or other agents, search again with `global: true`, or pass explicit `workspace`/`project` scopes.',
+  "A client that forwards no session id (DSH does not) gives ai-memory no coordinates, so an unscoped memory call resolves through its active-project pointer — often the shared slot, i.e. whatever project another agent touched last — instead of this session's repository.",
+  '',
+  '- Pass `workspace` and `project` together on every project-scoped memory call. Take the exact names from the nearest `.ai-memory.toml`; otherwise derive the project from the git origin (`<owner>-<repo>`), else the directory name.',
+  '- `memory_query` with `global: true` searches every project at once.',
   '- A thin or empty result means "not in this project", not "not remembered".',
 ].join('\n')
 

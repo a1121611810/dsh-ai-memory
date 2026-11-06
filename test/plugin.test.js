@@ -262,6 +262,11 @@ test('the Host publishes a memory-scope note at session start', () => {
   assert.equal(section.order, 600)
   assert.match(section.text, /global: true/)
   assert.match(section.text, /filed per project/)
+  // DSH's MCP client forwards no session id, so unscoped calls hit the shared
+  // slot; the note has to tell the model to pass the scope itself.
+  assert.match(section.text, /no session id/)
+  assert.match(section.text, /`workspace` and `project` together/)
+  assert.match(section.text, /\.ai-memory\.toml/)
 })
 
 test('announceScope: false suppresses the note', () => {

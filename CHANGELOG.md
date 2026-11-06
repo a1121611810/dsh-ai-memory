@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.10.2
+
+- The scope note now matches how DSH reaches ai-memory. Its MCP client forwards no session id
+  and runs in the Host working directory, so an unscoped `memory_*` call resolves through
+  ai-memory's active-project pointer — often the shared slot, i.e. whatever project another agent
+  touched last — not this session's repository. The note tells the model to pass `workspace` and
+  `project` on every project-scoped call and where to take the names (nearest `.ai-memory.toml`,
+  else the git origin, else the directory name).
+
 ## 0.10.1
 
 - The panel labels every visible session page, not just the newest eight. ai-memory 3.2.0+
