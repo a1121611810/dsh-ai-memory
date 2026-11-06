@@ -427,13 +427,14 @@ test('a session the server pinned to another agent is captured under that label'
   apply(h.ctx, { serverUrl: baseUrl, dataDir: h.dir, timeoutMs: 500 })
 
   h.handlers.get('session/created')({ id: 'session-pinned' })
-  await settle(h, 2)
+  await settle(h, 1)
+  await flush()
 
-  assert.equal(h.received.length, 2)
-  assert.match(h.received[0].url, /event=session-start&agent=dsh$/)
-  // The probe found the pinned label, so the session is announced again under it.
-  assert.match(h.received[1].url, /event=session-start&agent=claude-code$/)
-  assert.equal(h.received[1].body.session_id, 'session-pinned')
+  // The probe runs before the first send, so there is one start and it already
+  // carries the pinned label — no event is dropped as a collision.
+  assert.equal(h.received.length, 1)
+  assert.match(h.received[0].url, /event=session-start&agent=claude-code$/)
+  assert.equal(h.received[0].body.session_id, 'session-pinned')
   assert.ok(h.logs.some(([level, text]) => level === 'warn' && text.includes('pinned to agent=claude-code')))
   await h.close()
 })

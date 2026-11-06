@@ -65,6 +65,20 @@ test('a repository with no remote falls back to the directory name', () => {
   assert.deepEqual(resolveScope(root), { workspace: 'default', project: root.split('/').pop() })
 })
 
+test('a remote-derived name is lower-cased, like ai-memory', () => {
+  const root = scratch()
+  gitRepo(root, { origin: 'https://github.com/Acme/Pictelio.git' })
+  assert.equal(resolveScope(root).project, 'acme-pictelio')
+  assert.equal(projectFromRemote('git@github.com:Acme/NotifyGuard.git'), 'acme-notifyguard')
+})
+
+test('a directory name keeps its case', () => {
+  const root = scratch()
+  const dir = join(root, 'MyRepo')
+  mkdirSync(dir)
+  assert.equal(resolveScope(dir).project, 'MyRepo')
+})
+
 test('remote forms all collapse to owner-repo', () => {
   assert.equal(projectFromRemote('https://github.com/acme/shop.git'), 'acme-shop')
   assert.equal(projectFromRemote('https://github.com/acme/shop'), 'acme-shop')

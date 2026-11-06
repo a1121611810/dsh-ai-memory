@@ -145,6 +145,8 @@ shared slot, i.e. whatever project another agent touched last — instead of thi
   directory name.
 - `memory_query` with `global: true` searches every project at once.
 - Agents that run in the same repository still read each other's memory automatically.
+- A project name derived from a git remote is lower-cased (`Acme/Pictelio` → `acme-pictelio`);
+  the directory-name fallback keeps its case.
 
 This plugin tells the model that at every session (`announceScope`), so a thin result reads as
 "not in this project" instead of "not remembered".
@@ -184,6 +186,13 @@ Common causes:
 | `no readable bearer token` | `dataDir` is wrong, or the file is not readable by your user |
 | Sessions appear under the wrong project | The session's working directory is not the repository root |
 | Tool calls work but sessions do not | Only the MCP client is installed; this plugin is separate |
+| Events dropped as "session collision" | ai-memory already bound that session id to another agent label; the plugin adopts the bound label on the next session start |
+
+**MCP tools missing entirely.** ai-memory 3.4.2 advertises MCP revision 2026-07-28 but omits the
+mandatory `resultType` on `tools/list`, so a strict client rejects the result and reconnects
+forever with zero tools registered. Until ai-memory emits the field, put a small stdio proxy in
+front of `ai-memory mcp-bridge` that adds `resultType: "complete"` to results, point the MCP
+row's `command` at the proxy, and remove it once ai-memory fixes the result itself.
 
 ## Uninstall
 

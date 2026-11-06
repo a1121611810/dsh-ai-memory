@@ -242,9 +242,11 @@ export function apply(ctx, config) {
   const agentFor = async (sessionId) => sessionAgents.get(sessionId) ?? await resolveAgent()
 
   const scopeForCwd = (cwd) => {
-    if (scopeByCwd.has(cwd)) return scopeByCwd.get(cwd)
+    const cached = scopeByCwd.get(cwd)
+    if (cached !== undefined) return cached
     const scope = resolveScope(cwd)
-    scopeByCwd.set(cwd, scope)
+    // A miss is not cached: a marker added later should heal without a restart.
+    if (scope !== null) scopeByCwd.set(cwd, scope)
     return scope
   }
 
@@ -264,15 +266,13 @@ export function apply(ctx, config) {
       token,
       scope,
       sessionId,
-      timeoutMs: Math.min(settings.timeoutMs, 2000),
+      timeoutMs: Math.min(settings.timeoutMs, 500),
     })
     if (binding === null || binding.agent === sent) return
     sessionAgents.set(sessionId, binding.agent)
     captureNotes.set(sessionId, { sent, bound: binding.agent })
     while (captureNotes.size > 5) captureNotes.delete(captureNotes.keys().next().value)
     log('warn', 'session ' + sessionId + ' is pinned to agent=' + binding.agent + '; capturing under that label instead of ' + sent)
-    // Re-announce so the server sees this session's start under its own label.
-    send('session-start', sessionId, cwd)
   }
 
   const send = (event, sessionId, cwd, fields = {}) => {
@@ -305,8 +305,16 @@ export function apply(ctx, config) {
     if (typeof sessionId !== 'string' || sessionId === '') return
     if (cwd === null || closedSessions.has(sessionId) || openSessions.has(sessionId)) return
     openSessions.set(sessionId, cwd)
-    send('session-start', sessionId, cwd)
-    void adoptBinding(sessionId, cwd)
+    // Learn the pinned label first so the first event is not dropped as a
+    // collision. The probe costs one local round trip; the next prompt or tool
+    // event is seconds away, so the ordering it could race never materialises.
+    void (async () => {
+      try {
+        await adoptBinding(sessionId, cwd)
+      } finally {
+        send('session-start', sessionId, cwd)
+      }
+    })()
   }
 
   const opened = (session) => open(session?.id, cwdOf(session))

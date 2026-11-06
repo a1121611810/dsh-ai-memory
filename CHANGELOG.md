@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.10.5
+
+- A project name derived from a git remote is now lower-cased, matching ai-memory's own resolution
+  (`Acme/Pictelio` → `acme-pictelio`). The binding probe kept the remote's case, so it looked up a
+  project that does not exist and the self-heal silently never ran for mixed-case remotes; a
+  directory-name fallback keeps its case, as the server does.
+- The pinned label is read before the first event is sent, so a session ai-memory already bound to
+  another agent no longer loses its first `session-start` to a collision.
+
 ## 0.10.4
 
 - The capture row says only which label the plugin adopted. It no longer tells the user to open
